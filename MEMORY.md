@@ -17,7 +17,9 @@ Which DMS dataset to use for the hackathon? Requirements:
 - Mason et al. — SARS-CoV-2 RBD DMS datasets
 - Starr et al. — SARS-CoV-2 RBD deep scanning
 
-**Action:** Need to survey these, check data availability, variant count, and measurement quality before committing.
+**Status:** Loaders are now implemented in `quantab/data.py` for Phillips CR9114 (~67k, paired, continuous -log KD — strongest candidate), Engelhart AAYL (binding score), and Shanehsazzadeh trastuzumab (422, HCDR3 + KD). Dailey/MAGMA-seq/Adams deferred (single-point or complex multi-file formats). All datasets are mirrored to `s3://scrippsresearch-mshafiei-hackathon/DMS_Data/`.
+
+**Action:** Confirm which one is primary for the hackathon run. Phillips is the cleanest large paired set.
 
 ---
 
@@ -32,6 +34,8 @@ The scaling laws paper produced 15 models (5 sizes × 3 data sizes). For the hac
 
 Rationale: fix data size, vary model capacity — cleanest comparison axis. But should we instead fix model size and vary data? Or pick along the Pareto frontier?
 
+**Interim:** the implemented registry uses public checkpoints (IgBERT, ESM-2 35M/150M/650M, BALM-paired) so the pipeline runs end-to-end today; the custom scaling-laws checkpoints are deferred to the full paper where the scale comparison can be done systematically.
+
 **Action:** Discuss with Mahdi — he knows the models best.
 
 ---
@@ -43,7 +47,7 @@ Which layer(s) of the AbLM to extract embeddings from?
 - Pool across layers?
 - CDR-only tokens vs. full sequence?
 
-CDR-only might be more relevant for binding but reduces token count. Need to decide before extraction.
+CDR-only might be more relevant for binding but reduces token count. Need to decide before extraction. (Current code uses last hidden state — [CLS] pooling for IgBERT/BALM, mean pooling for ESM-2.)
 
 ---
 
@@ -67,7 +71,7 @@ Which ansatz designs to test? PennyLane options include:
 
 How many layers/depth? More depth = more expressiveness but slower simulation and potential barren plateaus.
 
-**Decision for hackathon:** Start with 2 architectures (one simple, one expressive). Systematic depth sweep in the paper.
+**Decision for hackathon:** Start with 2 architectures (one simple, one expressive). Systematic depth sweep in the paper. A single-register implementation of both (`quantum_minimal`, `quantum_expressive`) already exists in `quantab/quantum_kernels.py` and serves as the ablation baseline; the two-register version is the next build.
 
 ---
 
@@ -108,7 +112,18 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 | Quantum circuit topology | Two-register (ab register ‖ target register) + entangling gates | Tensor product H_ab ⊗ H_target naturally represents interaction; exponentially richer than concatenation |
 | Key ablation | Single-register on concatenated features | Isolates benefit of tensor product structure from quantum kernel benefit generally |
 | Classical baselines | Linear/RBF/Polynomial SVM + Random Forest + MLP | Standard kernel zoo, non-kernel reference, and neural baseline |
+| Data storage | S3 mirror, not committed to git | DMS data ~162 MB; `s3://scrippsresearch-mshafiei-hackathon/`, see `data/README.md` |
 | Approach to results | Benchmark, not advocacy | We report what we find. Negative results are valuable. |
+
+---
+
+## IgBERT implementation notes
+
+- Model ID: `Exscientia/IgBert`; hidden dim 1024 (BERT-large scale).
+- Input format: space-separated amino acids — `"E V Q L V E S ..."`.
+- Use the [CLS] token (index 0 of `last_hidden_state`) as the sequence embedding.
+- On CPU: ~30 min for 67k sequences; always pass `cache_path` to `embed_and_reduce()` to save raw embeddings. Name caches `{dataset}_{model_key}_{n_components}d.npy`.
+- Load report shows UNEXPECTED `cls.predictions` keys — expected and harmless (MLM head unused).
 
 ---
 
@@ -145,6 +160,15 @@ is the stronger scientific story and naturally tests the small-data hypothesis.
   embeddings (expect ~30–60 PCs for IgBERT). Do not fix in advance.
 - Learning curves: N = 50, 100, 200, 500, 1000, 2000.
 - "Small-data" framing recovers via cross-distribution generalization, not random subsampling.
+
+---
+
+### 2026-05-29 — Single-register pipeline + dataset mirror merged (Mahdi)
+
+- Implemented the full single-register baseline pipeline on the `mahdi_quant` branch: `quantab/data.py` (Phillips/Engelhart/trastuzumab loaders), `embeddings.py` (IgBERT + ESM-2 35M/150M/650M + BALM-paired registry with PCA), `quantum_kernels.py` (minimal + expressive single-register kernels), `classical.py`, `evaluation.py` (learning curves + Spearman), `visualization.py`, and CLI scripts `extract_embeddings.py` / `run_experiments.py` / `generate_figures.py`.
+- This serves as the **ablation/baseline arm** of the two-register design (single-register on antibody-only features) — a starting point to build the target modality and two-register circuit on top of, not a competing design.
+- Mirrored the DMS datasets (~162 MB) to `s3://scrippsresearch-mshafiei-hackathon/`, readable by the whole hackathon account; download instructions in `data/README.md`.
+- Known gaps to address: `scripts/extract_embeddings.py` concatenates heavy+light for all models (breaks BALM-paired, which needs separate chains — the library `embed_and_reduce` path is already correct); PennyLane not yet installed in the base env, so the quantum arm has not been run end-to-end.
 
 ---
 
