@@ -79,6 +79,54 @@ This repo will be shared with labmates and PI. Code should be clean, well-docume
 3. Learning curve analysis
 4. Then iterate: more kernels, more qubits, more models
 
+## AWS compute
+
+**EC2 instance for simulation and training (launched 2026-05-29):**
+
+| Field | Value |
+|---|---|
+| Instance ID | `i-038ef1f119518297a` |
+| Type | `c5.4xlarge` (16 vCPUs, 32 GB RAM) |
+| Private IP | `172.31.66.186` |
+| Data volume | 100 GB EBS at `/dev/xvdf` → mounted at `/data` |
+| AWS profile | `bnemoz-scripps` |
+| Region | `us-west-2` |
+
+Currently CPU-only (`lightning.qubit`). GPU quota increase pending — when granted, relaunch as `g4dn.xlarge` and switch to `lightning.gpu`.
+
+**SSH via EICE** (key push window is 60 s — run all three commands in quick succession):
+
+```bash
+ssh-keygen -t ed25519 -N "" -f /tmp/eice-key -q <<< y
+
+aws ec2-instance-connect send-ssh-public-key \
+  --instance-id i-038ef1f119518297a \
+  --instance-os-user ec2-user \
+  --ssh-public-key file:///tmp/eice-key.pub \
+  --profile bnemoz-scripps --region us-west-2
+
+ssh -i /tmp/eice-key -o StrictHostKeyChecking=no \
+  -o ProxyCommand='aws ec2-instance-connect open-tunnel \
+    --instance-id i-038ef1f119518297a \
+    --profile bnemoz-scripps --region us-west-2' \
+  ec2-user@i-038ef1f119518297a
+```
+
+**Mount data volume (first login only):**
+
+```bash
+sudo mkfs.xfs /dev/xvdf && sudo mkdir /data
+sudo mount /dev/xvdf /data && sudo chown ec2-user:ec2-user /data
+```
+
+**SCP a file to the instance:**
+
+```bash
+scp -i /tmp/eice-key \
+  -o ProxyCommand='aws ec2-instance-connect open-tunnel --instance-id i-038ef1f119518297a --profile bnemoz-scripps --region us-west-2' \
+  ./script.py ec2-user@i-038ef1f119518297a:/home/ec2-user/
+```
+
 ## What to avoid
 
 - Don't over-engineer infrastructure before we have results

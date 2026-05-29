@@ -84,10 +84,11 @@ Should we simulate quantum noise (shot noise, gate errors, decoherence) or use i
 
 ### AWS compute allocation
 
-Hackathon provides extended EC2 access. For 10-qubit statevector simulation, even a laptop is fine. But:
-- Embedding extraction from large AbLMs may need GPU instances
-- Full grid search (15 models × multiple DMS datasets × multiple circuits) could benefit from parallelization
-- Any interest in testing on actual quantum hardware (IBM Quantum, Amazon Braket)?
+**Instance launched 2026-05-29:** `i-038ef1f119518297a`, `c5.4xlarge`, private IP `172.31.66.186`, 100 GB EBS at `/data`. See CLAUDE.md for SSH instructions.
+
+GPU quota for G/VT instances is currently 0 on the hackathon account — organizers need to request an increase. When approved, relaunch as `g4dn.xlarge` (T4 GPU) and switch PennyLane device to `lightning.gpu` for faster kernel matrix computation.
+
+For Amazon Braket (real quantum hardware): possible future extension, not in hackathon scope.
 
 ---
 
@@ -98,13 +99,25 @@ Hackathon provides extended EC2 access. For 10-qubit statevector simulation, eve
 | Quantum framework | PennyLane | Python-native, strong ML integration, good tutorials, quantum kernel support built-in |
 | Primary metric | Spearman ρ | Rank correlation is robust to scale; standard in binding prediction benchmarks |
 | Core analysis | Learning curves | Directly tests the small-data hypothesis; publishable regardless of outcome |
-| Hackathon qubit counts | 6 and 10 | Two points on the scaling axis; 10 is tractable on a simulator |
+| Hackathon qubit counts | 6, 10, and 14 | Three points on expressibility axis; all tractable on CPU statevector sim. Bottleneck is N² kernel evals, not qubit count. |
 | Classical baselines | Linear/RBF/Polynomial SVM + Random Forest | Standard kernel zoo plus a non-kernel reference |
 | Approach to results | Benchmark, not advocacy | We report what we find. Negative results are valuable. |
 
 ---
 
 ## Discussion log
+
+### 2026-05-29 — Infrastructure setup (Benjamin + Claude)
+
+- AWS CLI installed, SSO configured with profile `bnemoz-scripps` on hackathon account `127696279288`
+- Fork created at https://github.com/bnemoz/QuantAb; Mahdi and Terrence added as collaborators
+- EC2 `c5.4xlarge` launched (`i-038ef1f119518297a`) with 100 GB EBS; SSH via EICE documented in CLAUDE.md
+- GPU quota (G/VT instances) is 0 on account — needs organizer to request increase before switching to `g4dn.xlarge` + `lightning.gpu`
+- Qubit plan updated: test **6, 10, and 14 qubits** (three points on scaling axis)
+- Affinity dataset schema confirmed: CSV with `heavy chain seq`, `light chain seq`, `target prot seq`, `affinity (KD)` — plain AA strings, no numbering scheme
+- Mahdi to update MEMORY.md with specific AbLM checkpoint combinations to test
+
+---
 
 ### 2025-05-20 — Initial brainstorm (Benjamin)
 
