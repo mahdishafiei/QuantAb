@@ -110,7 +110,7 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 ### 2026-05-29 — Infrastructure setup (Benjamin + Claude)
 
 - AWS CLI installed, SSO configured with profile `bnemoz-scripps` on hackathon account `127696279288`
-- Fork created at https://github.com/bnemoz/QuantAb; Mahdi and Terrence added as collaborators
+- Working directly on https://github.com/brineylab/QuantAb (no fork). Each team member has their own branch: `benjamin` (bnemoz), Mahdi and Terrence create their own.
 - EC2 `c5.4xlarge` launched (`i-038ef1f119518297a`) with 100 GB EBS; SSH via EICE documented in CLAUDE.md
 - GPU quota (G/VT instances) is 0 on account — needs organizer to request increase before switching to `g4dn.xlarge` + `lightning.gpu`
 - Qubit plan updated: test **6, 10, and 14 qubits** (three points on scaling axis)

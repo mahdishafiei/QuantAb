@@ -6,6 +6,8 @@ QuantAb explores whether quantum kernel methods can extract binding-relevant sig
 
 This is a Briney Lab project at The Scripps Research Institute, originating from a hackathon with AWS compute support.
 
+**Repo:** https://github.com/brineylab/QuantAb — working directly on this repo (no fork). Each team member has their own branch: `benjamin` (bnemoz), others create their own. Always work on your branch, never commit directly to `master`.
+
 ## Codebase conventions
 
 - **Python only.** All analysis code in Python 3.11+.
