@@ -105,6 +105,43 @@ def load_curated(path: Path) -> pl.DataFrame:
     )
 
 
+def normalize_affinity(
+    df: pl.DataFrame,
+    by: tuple[str, ...] = ("source", "antigen"),
+    method: str = "zscore",
+    out_col: str = "affinity_norm",
+) -> pl.DataFrame:
+    """Normalize the affinity label *within* experimental groups.
+
+    The curated dataset pools assays with different scales, dynamic-range ceilings, and
+    antigens, so raw ``-log10(KD)`` is not comparable across rows. This rescales the
+    ``affinity`` column within each ``by`` group so a single regression sees a consistent
+    target. Use this when pooling sources/antigens; skip it if you train on one group.
+
+    Args:
+        df: Output of :func:`load_curated` (must contain an ``affinity`` column).
+        by: Grouping columns defining a comparable assay/antigen unit.
+        method: ``"zscore"`` (per-group mean 0 / std 1) or ``"rank"`` (per-group quantile in [0, 1]).
+        out_col: Name of the added normalized column.
+
+    Returns:
+        ``df`` with an added ``out_col`` column (raw ``affinity`` is preserved).
+    """
+    by = list(by)
+    if method == "zscore":
+        return df.with_columns(
+            (
+                (pl.col("affinity") - pl.col("affinity").mean().over(by))
+                / pl.col("affinity").std().over(by)
+            ).alias(out_col)
+        )
+    if method == "rank":
+        return df.with_columns(
+            ((pl.col("affinity").rank("average").over(by) - 1) / (pl.len().over(by) - 1)).alias(out_col)
+        )
+    raise ValueError(f"Unknown method '{method}'. Use 'zscore' or 'rank'.")
+
+
 def load_all(data_dir: Path) -> pl.DataFrame:
     """Load and concatenate all available DMS datasets."""
     loaders = [load_phillips, load_engelhart, load_trastuzumab]
