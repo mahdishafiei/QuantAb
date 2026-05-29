@@ -132,10 +132,10 @@ embeddings/
 Two arms are evaluated separately as learning curves:
 
 ```bash
-# Classical arm — SVM / random-forest baselines
+# Classical arm
 python scripts/run_experiments.py --no-quantum
 
-# Quantum arm — quantum kernel SVMs (adds the quantum kernels)
+# Quantum arm (adds the quantum kernels)
 python scripts/run_experiments.py
 ```
 
