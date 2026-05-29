@@ -13,7 +13,7 @@ affinity prediction?
 This project applies quantum machine learning to antibody-antigen affinity prediction. Antibody
 sequences are encoded as embeddings via two language models — the antibody-specific
 [IgBERT](https://huggingface.co/Exscientia/IgBert) and the general protein model
-[ESM-2](https://huggingface.co/facebook/esm2_t12_35M_UR50D) — then compressed to low
+[ESM-2](https://huggingface.co/facebook/esm2_t33_650M_UR50D) — then compressed to low
 dimensions via PCA, and evaluated using quantum kernel SVMs versus classical baselines across
 a range of training set sizes (learning curves).
 
@@ -106,7 +106,7 @@ Options:
 ```
 --data-dir      Path to the DMS_Data directory (required)
 --output-dir    Where to save embeddings (default: embeddings/)
---model         igbert | esm2_35M | esm2_150M | all  (default: all)
+--model         igbert | esm2_35M | esm2_150M | esm2_650M | all  (default: all)
 --n-components  PCA dimensions to compute, e.g. --n-components 6 10  (default: 6 10)
 --overwrite     Force recompute even if files exist
 ```
@@ -138,7 +138,7 @@ Options:
 ```
 --embeddings-dir   Directory with embedding files (default: embeddings/)
 --results-dir      Where to save results (default: results/)
---model            igbert | esm2_35M | esm2_150M | all  (default: all)
+--model            igbert | esm2_35M | esm2_150M | esm2_650M | all  (default: all)
 --dataset          Specific dataset name(s) to run
 --n-components     PCA dims to evaluate, e.g. --n-components 6 10
 --no-quantum       Skip quantum kernels (much faster, classical only)
@@ -148,7 +148,7 @@ Options:
 For a quick test run (classical only, small dataset):
 ```bash
 python scripts/run_experiments.py \
-    --model esm2_35M \
+    --model esm2_650M \
     --dataset trastuzumab_zero_shot \
     --n-components 6 \
     --no-quantum
@@ -176,7 +176,7 @@ df = load_all(DATA_DIR)
 summarize(df)
 
 # Extract embeddings
-tok, model, cfg = load_model("igbert")   # or "esm2_35M"
+tok, model, cfg = load_model("igbert")   # or "esm2_650M"
 X, y, pca = embed_and_reduce(
     df, tok, model, cfg,
     n_components=10,

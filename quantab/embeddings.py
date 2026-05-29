@@ -2,9 +2,10 @@
 
 Supported models
 ----------------
-igbert   : Exscientia/IgBert   — antibody-specific BERT, 1024-dim
-esm2_35M : facebook/esm2_t12_35M_UR50D  — general protein ESM-2, 480-dim
-esm2_150M: facebook/esm2_t30_150M_UR50D — general protein ESM-2, 640-dim
+igbert    : Exscientia/IgBert              — antibody-specific BERT, 1024-dim
+esm2_35M  : facebook/esm2_t12_35M_UR50D   — general protein ESM-2,  480-dim
+esm2_150M : facebook/esm2_t30_150M_UR50D  — general protein ESM-2,  640-dim
+esm2_650M : facebook/esm2_t33_650M_UR50D  — general protein ESM-2, 1280-dim  ← recommended
 """
 
 from __future__ import annotations
@@ -48,6 +49,12 @@ REGISTRY: dict[str, ModelConfig] = {
     "esm2_150M": ModelConfig(
         hf_name="facebook/esm2_t30_150M_UR50D",
         hidden_dim=640,
+        space_sep=False,
+        pool="mean",
+    ),
+    "esm2_650M": ModelConfig(
+        hf_name="facebook/esm2_t33_650M_UR50D",
+        hidden_dim=1280,
         space_sep=False,
         pool="mean",
     ),

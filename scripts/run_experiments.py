@@ -143,7 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default="all",
-        choices=["all", "igbert", "esm2_35M", "esm2_150M"],
+        choices=["all", "igbert", "esm2_35M", "esm2_150M", "esm2_650M"],
         help="Which model embeddings to use (default: all).",
     )
     parser.add_argument(
