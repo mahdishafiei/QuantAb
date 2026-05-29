@@ -58,6 +58,54 @@ Total qubits = k_ab + k_target. Typical targets: (6,6)=12, (8,8)=16, (10,10)=20,
 
 **Repo:** https://github.com/brineylab/QuantAb — working directly on this repo (no fork). Each team member has their own branch: `benjamin` (bnemoz), others create their own. Always work on your branch, never commit directly to `master`.
 
+## Current implementation status (single-register baseline)
+
+The code currently on this branch implements the **single-register baseline / ablation arm** of the design above: antibody-only embeddings (no target register yet), reduced by PCA, fed to single-register quantum kernels and classical baselines. This is exactly the "single-register on concatenated features" ablation the two-register design is measured against — so it is a useful starting point, not a competing design. Building out the target modality and the two-register circuit is the next step.
+
+What is implemented today:
+
+- **Embedding models** — unified registry in `quantab/embeddings.py`:
+
+  | Key | Model | Type | Dim | Input format | Pooling |
+  |---|---|---|---|---|---|
+  | `igbert` | `Exscientia/IgBert` | Antibody-specific | 1024 | Space-separated AAs | [CLS] |
+  | `esm2_35M` | `facebook/esm2_t12_35M_UR50D` | General protein | 480 | Raw sequence | Mean |
+  | `esm2_150M` | `facebook/esm2_t30_150M_UR50D` | General protein | 640 | Raw sequence | Mean |
+  | `esm2_650M` | `facebook/esm2_t33_650M_UR50D` | General protein | 1280 | Raw sequence | Mean |
+  | `balm_paired` | `brineylab/BALM-paired` | Natively-paired antibody | 1024 | (heavy, light) pair | [CLS] |
+
+  Note: `balm_paired` takes heavy and light as two separate sequences (RoBERTa two-sequence input), not concatenated. (Caveat: `scripts/extract_embeddings.py` currently concatenates for all models — fix before running BALM through the script; the library `embed_and_reduce` path already handles pairing correctly.)
+
+- **Quantum kernels** (`quantab/quantum_kernels.py`) — `quantum_minimal` (angle encoding + 1 entangling layer) and `quantum_expressive` (repeated Ry+CNOT layers), single-register, `lightning.qubit` simulator. O(N²) kernel matrices — keep ≤500 points.
+- **Classical baselines** (`quantab/classical.py`) — linear/RBF/poly SVM + random forest.
+- **Evaluation** (`quantab/evaluation.py`) — learning curves, k-fold CV, Spearman metric.
+- **Scripts** — `extract_embeddings.py`, `run_experiments.py`, `generate_figures.py` (idempotent, CLI-driven).
+
+## Dataset paths
+
+DMS datasets are **not committed** (~162 MB). They are mirrored to S3 and also live on the hackathon server.
+
+- **S3 (source of truth):** `s3://scrippsresearch-mshafiei-hackathon/DMS_Data/` and `.../AB-Bind-Database/` (readable by everyone in the hackathon AWS account `127696279288`). See `data/README.md` for download commands.
+- **Server-local:** `/home/jovyan/work/Hackaton/DMS_Data/`
+
+| Directory | Dataset | Key columns | N variants |
+|---|---|---|---|
+| `02_phillips_cr9114_cr6261/` | Phillips et al. 2021 CR9114 anti-influenza DMS | `heavy`, `light`, `*_neg_log_kd` | ~67,000 |
+| `05_engelhart_aayl/` | Engelhart et al. AAYL variants | `heavy_chain_seq`, `binding_score`, `light_chain_seq` | ~varies |
+| `06_shanehsazzadeh_trastuzumab/` | Shanehsazzadeh trastuzumab zero-shot binders | `HCDR3`, `-log(KD (M))` | 422 |
+| `01_dailey_cr9114/` | Dailey CR9114 single-point mutants | `mut`, `minus_log_Kd` | ~varies |
+| `03_magma_seq/` | MAGMA-seq data | mixed | — |
+| `04_adams_4420/` | Adams et al. titeseq | see `16_titeseq/` | — |
+
+```python
+from pathlib import Path
+from quantab.data import load_all, summarize
+
+DATA_DIR = Path("/home/jovyan/work/Hackaton/DMS_Data")  # or /data/DMS_Data on EC2
+df = load_all(DATA_DIR)
+summarize(df)
+```
+
 ## Codebase conventions
 
 - **Python only.** All analysis code in Python 3.11+.
@@ -76,7 +124,7 @@ QuantAb/
 ├── PLAN.md
 ├── CLAUDE.md
 ├── MEMORY.md
-├── data/                  # DMS datasets (not committed — .gitignore)
+├── data/                  # DMS datasets (not committed — .gitignore); data/README.md documents S3 location
 ├── embeddings/            # Extracted embeddings (not committed — .gitignore)
 ├── notebooks/             # Jupyter notebooks for exploration and visualization
 │   └── 01_embedding_extraction.ipynb
@@ -86,6 +134,7 @@ QuantAb/
 │   └── 05_results_visualization.ipynb
 ├── quantab/               # Python package
 │   ├── __init__.py
+│   ├── data.py            # DMS dataset loaders
 │   ├── embeddings.py      # AbLM embedding extraction and PCA
 │   ├── quantum_kernels.py # PennyLane quantum kernel implementations
 │   ├── classical.py       # Classical kernel baselines
@@ -93,8 +142,7 @@ QuantAb/
 │   └── visualization.py   # Plotting and figure generation
 ├── scripts/               # Standalone pipeline scripts
 │   ├── extract_embeddings.py
-│   ├── run_quantum_experiment.py
-│   ├── run_classical_baselines.py
+│   ├── run_experiments.py
 │   └── generate_figures.py
 ├── results/               # Experiment outputs (not committed — .gitignore)
 ├── figures/               # Generated figures
@@ -119,6 +167,7 @@ QuantAb/
 - **Deterministic seeds everywhere.** Set `random_state` / `seed` in all stochastic operations. Default seed: 42.
 - **Learning curves are the core analysis.** Every method must be evaluated across a range of training set sizes (e.g., 20, 50, 100, 200, full).
 - **Never overfit to one dataset.** Hackathon uses 1 DMS dataset; paper will generalize to multiple. Keep code dataset-agnostic.
+- **Never leak test data** — always split before fitting PCA.
 
 ## Tone and communication
 
@@ -129,7 +178,7 @@ This repo will be shared with labmates and PI. Code should be clean, well-docume
 1. Get embedding extraction working first (this unblocks everything)
 2. Get one quantum kernel + one classical baseline running end-to-end
 3. Learning curve analysis
-4. Then iterate: more kernels, more qubits, more models
+4. Then iterate: more kernels, more qubits, more models — and build out the target modality + two-register circuit
 
 ## AWS compute
 
