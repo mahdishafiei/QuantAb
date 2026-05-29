@@ -11,9 +11,11 @@ that classical kernels miss — especially in the small-labeled-data regime typi
 affinity prediction?
 
 This project applies quantum machine learning to antibody-antigen affinity prediction. Antibody
-sequences are encoded as embeddings via [IgBERT](https://huggingface.co/Exscientia/IgBert),
-compressed to low dimensions via PCA (to match a qubit budget), and then evaluated using
-quantum kernel SVMs against classical baselines across a range of training set sizes.
+sequences are encoded as embeddings via two language models — the antibody-specific
+[IgBERT](https://huggingface.co/Exscientia/IgBert) and the general protein model
+[ESM-2](https://huggingface.co/facebook/esm2_t12_35M_UR50D) — then compressed to low
+dimensions via PCA, and evaluated using quantum kernel SVMs versus classical baselines across
+a range of training set sizes (learning curves).
 
 ---
 
@@ -23,6 +25,11 @@ quantum kernel SVMs against classical baselines across a range of training set s
 > kernel methods operating on antibody language model embeddings capture binding-relevant
 > structure that classical kernels miss?
 
+A secondary question this project uniquely addresses:
+
+> Does any quantum kernel advantage depend on the embedding model — antibody-specific (IgBERT)
+> vs. general protein (ESM-2)?
+
 ---
 
 ## Pipeline
@@ -30,31 +37,22 @@ quantum kernel SVMs against classical baselines across a range of training set s
 ```
 Antibody sequences
       ↓
-IgBERT embeddings  (1024-dim, [CLS] token)
+AbLM embeddings
+  ├── IgBERT  (antibody-specific, 1024-dim, [CLS] pooling)
+  └── ESM-2   (general protein,   480-dim,  mean pooling)
       ↓
-PCA reduction  (6 or 10 dimensions — matching qubit budget)
+PCA reduction  →  6 or 10 dimensions  (= qubit count)
       ↓
-┌─────────────────────────┐    ┌──────────────────────────────┐
-│  Quantum kernel SVM     │    │  Classical kernel SVM / RF   │
-│  (PennyLane circuits)   │    │  (RBF, Linear, Polynomial)   │
-└─────────────────────────┘    └──────────────────────────────┘
-      ↓                                      ↓
-      └──────── Spearman ρ vs. training set size (learning curves) ──────┘
+┌──────────────────────────┐    ┌─────────────────────────────────┐
+│  Quantum kernel SVM      │    │  Classical kernel SVM / RF      │
+│  · Minimal ansatz        │    │  · Linear SVM                   │
+│  · Expressive ansatz     │    │  · RBF SVM                      │
+│    (PennyLane circuits)  │    │  · Polynomial SVM               │
+└──────────────────────────┘    │  · Random Forest                │
+                                └─────────────────────────────────┘
+      ↓
+Spearman ρ  vs.  training set size  →  learning curves
 ```
-
----
-
-## Methods
-
-| Component | Choice | Notes |
-|---|---|---|
-| Embedding models | IgBERT (`Exscientia/IgBert`) + ESM-2 (`facebook/esm2_t12_35M_UR50D`) | Antibody-specific vs general protein LM comparison |
-| Dimensionality reduction | PCA | 6 and 10 components (= n_qubits) |
-| Quantum framework | PennyLane `lightning.qubit` | Statevector simulation |
-| Quantum kernels | Minimal ansatz, Expressive ansatz | Angle encoding + CNOT layers |
-| Classical baselines | Linear SVM, RBF SVM, Poly SVM, Random Forest | Identical PCA features |
-| Primary metric | Spearman rank correlation | Robust to affinity scale differences |
-| Core analysis | Learning curves | Performance vs. training set size |
 
 ---
 
@@ -65,9 +63,148 @@ continuous binding measurements (KD or enrichment score):
 
 | Dataset | Antibody | Variants | Measurement |
 |---|---|---|---|
-| Phillips et al. 2021 | CR9114 anti-influenza | ~67,000 | -log(KD) |
+| Phillips et al. 2021 | CR9114 anti-influenza (H1/H3) | ~67,000 | -log(KD) |
 | Engelhart et al. | AAYL antibody variants | ~42,000 | Binding score |
 | Shanehsazzadeh et al. | Trastuzumab (HER2) | 422 | -log(KD) |
+
+---
+
+## Installation
+
+```bash
+git clone git@github.com:mahdishafiei/QuantAb.git
+cd QuantAb
+pip install -r requirements.txt
+pip install -e .
+```
+
+> **Note:** `torch` is installed as a CPU build by default. For GPU acceleration,
+> install the appropriate CUDA version first:
+> `pip install torch --index-url https://download.pytorch.org/whl/cu118`
+
+Verify the install:
+
+```bash
+python -c "import quantab; print('quantab ready')"
+```
+
+---
+
+## Running the pipeline
+
+### Step 1 — Extract embeddings
+
+Run IgBERT and ESM-2 on all datasets and save embeddings to disk.
+This is the slow step (~30 min on CPU for 109k sequences). It only needs to run once —
+subsequent runs skip already-computed files.
+
+```bash
+python scripts/extract_embeddings.py --data-dir /path/to/DMS_Data
+```
+
+Options:
+```
+--data-dir      Path to the DMS_Data directory (required)
+--output-dir    Where to save embeddings (default: embeddings/)
+--model         igbert | esm2_35M | esm2_150M | all  (default: all)
+--n-components  PCA dimensions to compute, e.g. --n-components 6 10  (default: 6 10)
+--overwrite     Force recompute even if files exist
+```
+
+Output structure:
+```
+embeddings/
+  igbert/
+    phillips_all_raw.npy      # raw 1024-dim  (N, 1024)
+    phillips_all_6d.npy       # PCA-reduced   (N, 6)
+    phillips_all_10d.npy      # PCA-reduced   (N, 10)
+    phillips_all_labels.npy   # affinity y    (N,)
+    engelhart_...npy
+    ...
+  esm2_35M/
+    phillips_all_raw.npy      # raw 480-dim
+    ...
+```
+
+### Step 2 — Run experiments
+
+Compute learning curves for all methods (quantum + classical) on the extracted embeddings.
+
+```bash
+python scripts/run_experiments.py
+```
+
+Options:
+```
+--embeddings-dir   Directory with embedding files (default: embeddings/)
+--results-dir      Where to save results (default: results/)
+--model            igbert | esm2_35M | esm2_150M | all  (default: all)
+--dataset          Specific dataset name(s) to run
+--n-components     PCA dims to evaluate, e.g. --n-components 6 10
+--no-quantum       Skip quantum kernels (much faster, classical only)
+--overwrite        Rerun even if result files exist
+```
+
+For a quick test run (classical only, small dataset):
+```bash
+python scripts/run_experiments.py \
+    --model esm2_35M \
+    --dataset trastuzumab_zero_shot \
+    --n-components 6 \
+    --no-quantum
+```
+
+### Step 3 — Generate figures
+
+```bash
+python scripts/generate_figures.py
+```
+
+Saves one learning curve figure per result file to `figures/`.
+
+---
+
+## Programmatic API
+
+```python
+from pathlib import Path
+from quantab import load_all, summarize, load_model, embed_and_reduce
+
+# Load datasets
+DATA_DIR = Path("/path/to/DMS_Data")
+df = load_all(DATA_DIR)
+summarize(df)
+
+# Extract embeddings
+tok, model, cfg = load_model("igbert")   # or "esm2_35M"
+X, y, pca = embed_and_reduce(
+    df, tok, model, cfg,
+    n_components=10,
+    cache_path=Path("embeddings/igbert/all_10d.npy"),
+)
+
+# Run learning curve
+from quantab import learning_curve, CLASSICAL_MODELS, build_minimal_kernel
+
+# Classical
+results = learning_curve(
+    CLASSICAL_MODELS["rbf_svm"](),
+    X, y,
+    train_sizes=[20, 50, 100, 200, 500],
+)
+
+# Quantum
+results = learning_curve(
+    build_minimal_kernel(n_qubits=10),
+    X, y,
+    train_sizes=[20, 50, 100, 200],
+    is_quantum=True,
+)
+
+# Plot
+from quantab import plot_learning_curves
+plot_learning_curves({"rbf_svm": results}, title="RBF SVM learning curve")
+```
 
 ---
 
@@ -76,42 +213,24 @@ continuous binding measurements (KD or enrichment score):
 ```
 QuantAb/
 ├── quantab/               # Core Python package
+│   ├── __init__.py        # Clean public API
 │   ├── data.py            # DMS dataset loaders
-│   ├── embeddings.py      # IgBERT extraction + PCA
+│   ├── embeddings.py      # IgBERT + ESM-2 extraction, PCA, model registry
 │   ├── quantum_kernels.py # PennyLane quantum kernel implementations
-│   ├── classical.py       # Classical kernel baselines
+│   ├── classical.py       # sklearn classical baselines
 │   ├── evaluation.py      # Learning curves, CV, Spearman metric
 │   └── visualization.py   # Figure generation
-├── scripts/               # End-to-end pipeline scripts
-├── notebooks/             # Exploration and results notebooks
+├── scripts/
+│   ├── extract_embeddings.py   # Step 1: sequences → cached embeddings
+│   ├── run_experiments.py      # Step 2: embeddings → learning curve results
+│   └── generate_figures.py    # Step 3: results → figures
+├── notebooks/             # Exploration notebooks
 ├── figures/               # Generated figures (committed)
+├── requirements.txt
+├── pyproject.toml
 ├── PLAN.md                # Full experimental design
 ├── CLAUDE.md              # Claude Code collaboration guide
 └── MEMORY.md              # Design decisions and discussion log
-```
-
----
-
-## Getting started
-
-```bash
-git clone git@github.com:mahdishafiei/QuantAb.git
-cd QuantAb
-pip install -e .
-```
-
-```python
-from pathlib import Path
-from quantab.data import load_all, summarize
-from quantab.embeddings import load_igbert, embed_and_reduce
-
-DATA_DIR = Path("/path/to/DMS_Data")
-df = load_all(DATA_DIR)
-summarize(df)
-
-tok, model = load_igbert()
-X, y, pca = embed_and_reduce(df, tok, model, n_components=10,
-                              cache_path=Path("embeddings/all_10d.npy"))
 ```
 
 ---
