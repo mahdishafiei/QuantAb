@@ -46,12 +46,11 @@ AbLM embeddings
 PCA reduction  →  6 or 10 dimensions  (= qubit count)
       ↓
 ┌──────────────────────────┐    ┌─────────────────────────────────┐
-│  Quantum kernel SVM      │    │  Classical kernel SVM / RF      │
-│  · Minimal ansatz        │    │  · Linear SVM                   │
-│  · Expressive ansatz     │    │  · RBF SVM                      │
-│    (PennyLane circuits)  │    │  · Polynomial SVM               │
-└──────────────────────────┘    │  · Random Forest                │
-                                └─────────────────────────────────┘
+│  Quantum kernel           │    │  Classical baseline             │
+│  · Minimal ansatz        │    │  · MLP head                     │
+│  · Expressive ansatz     │    │  · kernel comparator            │
+│    (PennyLane circuits)  │    │                                 │
+└──────────────────────────┘    └─────────────────────────────────┘
       ↓
 Spearman ρ  vs.  training set size  →  learning curves
 ```
