@@ -99,13 +99,42 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 | Quantum framework | PennyLane | Python-native, strong ML integration, good tutorials, quantum kernel support built-in |
 | Primary metric | Spearman ρ | Rank correlation is robust to scale; standard in binding prediction benchmarks |
 | Core analysis | Learning curves | Directly tests the small-data hypothesis; publishable regardless of outcome |
-| Hackathon qubit counts | 6, 10, and 14 | Three points on expressibility axis; all tractable on CPU statevector sim. Bottleneck is N² kernel evals, not qubit count. |
-| Classical baselines | Linear/RBF/Polynomial SVM + Random Forest | Standard kernel zoo plus a non-kernel reference |
+| Hackathon qubit counts | (6,6), (8,8), (10,10) per register | Two registers (ab + target); total 12/16/20 qubits. Tractable on CPU/GPU. |
+| Antibody model | IgBERT (preferred) or BALM | Must accept **paired VH+VL** — never embed chains separately |
+| Target model | ESM2 | Standard protein LM; pooled sequence embedding |
+| Embedding pipeline | Separate extraction → separate normalize → separate PCA → two-register quantum / concatenate classical | Modalities are heterogeneous; joint PCA without normalization is dominated by largest space |
+| DR method (hackathon) | PCA per modality | Unsupervised, no label leakage, interpretable |
+| DR method (paper) | PCA + PLSR + random projection | PLSR maximizes label covariance; random projection is null baseline |
+| Quantum circuit topology | Two-register (ab register ‖ target register) + entangling gates | Tensor product H_ab ⊗ H_target naturally represents interaction; exponentially richer than concatenation |
+| Key ablation | Single-register on concatenated features | Isolates benefit of tensor product structure from quantum kernel benefit generally |
+| Classical baselines | Linear/RBF/Polynomial SVM + Random Forest + MLP | Standard kernel zoo, non-kernel reference, and neural baseline |
 | Approach to results | Benchmark, not advocacy | We report what we find. Negative results are valuable. |
 
 ---
 
 ## Discussion log
+
+### 2026-05-29 — Embedding architecture and quantum circuit design (Benjamin + Claude)
+
+**Key architectural decision: two modalities, two registers.**
+
+Embeddings come from two separate models:
+- Antibody: IgBERT or BALM on **paired VH+VL** (single embedding per antibody sample). Paired input is required — do not embed chains separately.
+- Target: ESM2 on target protein sequence.
+
+Pipeline: extract separately → z-score normalize each independently → separate PCA/PLSR per modality → classical arm concatenates; quantum arm uses a two-register circuit.
+
+**Why two registers?** Affinity is an interaction property. The two-register quantum kernel operates in the tensor product space H_ab ⊗ H_target (2^(k_ab+k_target)-dimensional), which classical concatenation cannot represent without exponential cost. This is now the core scientific claim of the paper.
+
+**Qubit budget:** (k_ab, k_target) pairs: (6,6)=12, (8,8)=16, (10,10)=20, (14,14)=28 total qubits. Sweet spot for the paper: around 20–28 total qubits, matching informative embedding dimensionality.
+
+**DR decisions:** PCA per modality for hackathon. For paper: add PLSR (label-predictive) and random projection (null baseline) as second DR axis. Number of components determined by cross-validated Spearman ρ, not fixed in advance.
+
+**Key ablation:** single-register quantum kernel on concatenated features vs. two-register — isolates tensor product benefit specifically.
+
+**Skeptical note on qubit count:** more qubits only help if PCA components carry real signal. With ~3000 samples, informative dimensionality is likely 20–35 PCs per modality. Elbow on explained variance curve (once data arrives) should set the ceiling, not hardware ambition.
+
+---
 
 ### 2026-05-29 — Infrastructure setup (Benjamin + Claude)
 

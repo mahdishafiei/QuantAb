@@ -2,9 +2,59 @@
 
 ## Project context
 
-QuantAb explores whether quantum kernel methods can extract binding-relevant signal from antibody language model (AbLM) embeddings that classical kernels miss, particularly in the small-labeled-data regime typical of affinity prediction.
+QuantAb explores whether quantum kernel methods — specifically two-register quantum kernels in tensor product Hilbert spaces — can capture antibody-antigen binding affinity signal that classical methods miss, in the small-labeled-data regime.
 
 This is a Briney Lab project at The Scripps Research Institute, originating from a hackathon with AWS compute support.
+
+## Embedding architecture (two modalities, two registers)
+
+Each sample produces **two independent embeddings** extracted by two separate models:
+
+| Modality | Model | Input | Output |
+|----------|-------|-------|--------|
+| Antibody | IgBERT (preferred) or BALM | Paired VH+VL (concatenated with separator token) | Single pooled embedding [dim_ab] |
+| Target protein | ESM2 | Target protein sequence | Pooled embedding [dim_target] |
+
+**Paired VH+VL is required** — always use models that accept both chains together (IgBERT does this natively). Do not embed heavy and light chains separately unless a model forces it.
+
+### Pipeline
+
+```
+Input CSV: heavy chain seq | light chain seq | target prot seq | affinity (KD)
+                ↓                                     ↓
+         IgBERT (paired VH+VL)                     ESM2
+                ↓                                     ↓
+       ab_embeddings [N, dim_ab]        target_embeddings [N, dim_target]
+                ↓                                     ↓
+         z-score normalize                    z-score normalize
+                ↓                                     ↓
+       PCA/PLSR → k_ab dims             PCA/PLSR → k_target dims
+                ↓                                     ↓
+        ┌───────────────────────────────────────────────┐
+        │  Classical arm: concatenate → SVM / RF / MLP  │
+        │  Quantum arm: two-register circuit             │
+        │    register 1 (k_ab qubits): antibody         │
+        │    register 2 (k_target qubits): target       │
+        │    → entangling gates → kernel matrix → SVM   │
+        │  Ablation: single-register on concatenated    │
+        └───────────────────────────────────────────────┘
+```
+
+### Why two registers matter scientifically
+
+Affinity is an interaction property — it emerges from the joint state of both molecules. The two-register quantum kernel operates in H_ab ⊗ H_target (tensor product), which is 2^(k_ab + k_target)-dimensional. Classical concatenation cannot represent this interaction structure without exponential cost. This is the core scientific claim.
+
+### Dimensionality reduction
+
+- **Normalize each modality independently** before any joint operation (different models, different scales).
+- **Separate PCA per modality** for the hackathon (unsupervised, no label leakage).
+- **PLSR** as a second DR arm for the paper (label-predictive, risk of overfitting in small-data regime — interesting tension to report).
+- **Random projection** as a null baseline (one extra line of code, scientifically important).
+- Number of components (k_ab, k_target) set by cross-validated Spearman ρ on a classical baseline, not fixed in advance.
+
+### Qubit budget
+
+Total qubits = k_ab + k_target. Typical targets: (6,6)=12, (8,8)=16, (10,10)=20, (14,14)=28.
 
 **Repo:** https://github.com/brineylab/QuantAb — working directly on this repo (no fork). Each team member has their own branch: `benjamin` (bnemoz), others create their own. Always work on your branch, never commit directly to `master`.
 
@@ -54,10 +104,10 @@ QuantAb/
 
 ## Key dependencies
 
-- `pennylane` — Quantum ML framework (circuits, kernels, simulation)
-- `scikit-learn` — SVM, cross-validation, metrics
+- `pennylane` — Quantum ML framework (two-register circuits, kernel estimation, simulation)
+- `scikit-learn` — SVM, cross-validation, metrics, PCA, PLSR
 - `polars` — Data manipulation
-- `transformers` — HuggingFace model loading for AbLM checkpoints
+- `transformers` — HuggingFace model loading for IgBERT, BALM, ESM2
 - `torch` — Backend for embedding extraction
 - `matplotlib` / `seaborn` — Visualization
 - `scipy` — Spearman correlation, statistical tests
