@@ -15,7 +15,7 @@ sequences are encoded as embeddings via three language models — the antibody-s
 [IgBERT](https://huggingface.co/Exscientia/IgBert), the general protein model
 [ESM-2](https://huggingface.co/facebook/esm2_t33_650M_UR50D), and the natively-paired
 antibody model [BALM-paired](https://huggingface.co/brineylab/BALM-paired) (Burbach & Briney
-2024) — then compressed to low dimensions via PCA, and evaluated using quantum kernel SVMs
+2024) — then compressed to low dimensions via PCA, and evaluated using quantum kernel methods
 versus classical baselines across a range of training set sizes (learning curves).
 
 ---
