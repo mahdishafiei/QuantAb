@@ -78,6 +78,33 @@ def load_trastuzumab(data_dir: Path) -> pl.DataFrame:
     return df
 
 
+def load_curated(path: Path) -> pl.DataFrame:
+    """Load the curated DMS binding dataset (``filtered_data.csv`` on S3).
+
+    File columns: ``hc_seq, lc_seq, target_seq, kd_nm, source, antibody, antigen, notes``.
+    The affinity label is converted to ``-log10(KD in M)`` (higher = stronger binding),
+    matching the ``neg_log_kd`` convention used elsewhere in the project.
+
+    Args:
+        path: Path to the curated CSV (e.g. ``curated_data/filtered_data.csv``).
+
+    Returns:
+        Columns: ``heavy, light, target, affinity, kd_nm, source, antibody, antigen, dataset``.
+    """
+    df = pl.read_csv(path, infer_schema_length=5000)
+    return (
+        df.rename({"hc_seq": "heavy", "lc_seq": "light", "target_seq": "target"})
+        # kd_nm is in nanomolar → KD[M] = kd_nm * 1e-9 → affinity = -log10(KD[M])
+        .with_columns((-(pl.col("kd_nm") * 1e-9).log10()).alias("affinity"))
+        .with_columns(pl.col("source").alias("dataset"))
+        .select(
+            ["heavy", "light", "target", "affinity", "kd_nm",
+             "source", "antibody", "antigen", "dataset"]
+        )
+        .drop_nulls(subset=["heavy", "light", "affinity"])
+    )
+
+
 def load_all(data_dir: Path) -> pl.DataFrame:
     """Load and concatenate all available DMS datasets."""
     loaders = [load_phillips, load_engelhart, load_trastuzumab]

@@ -33,41 +33,55 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from quantab.data import load_all, summarize
-from quantab.embeddings import REGISTRY, extract_embeddings, fit_pca, load_model
+from quantab.data import load_all, load_curated, summarize
+from quantab.embeddings import REGISTRY, ModelConfig, extract_embeddings, fit_pca, load_model
 
 PCA_DIMS = [6, 10]
 BATCH_SIZE = 64
 
 
-def get_sequences(df: pl.DataFrame, use_paired: bool = True) -> list[str]:
-    if use_paired and "light" in df.columns:
-        return [
-            h + l if l is not None else h
-            for h, l in zip(df["heavy"].to_list(), df["light"].to_list())
-        ]
-    return df["heavy"].to_list()
+def get_sequences(df: pl.DataFrame, cfg: ModelConfig):
+    """Build the model's expected input from heavy (+ light) chains.
+
+    - Paired models (e.g. balm_paired): list of ``(heavy, light)`` tuples — the tokenizer
+      handles native pairing. Concatenation is NOT used.
+    - Single-chain models: heavy + light concatenated into one string when light exists.
+    """
+    heavy = df["heavy"].to_list()
+    light = df["light"].to_list() if "light" in df.columns else [None] * len(heavy)
+
+    if cfg.paired:
+        return [(h, l if l is not None else "") for h, l in zip(heavy, light)]
+    if "light" in df.columns:
+        return [h + l if l is not None else h for h, l in zip(heavy, light)]
+    return heavy
 
 
 def run(args: argparse.Namespace) -> None:
-    data_dir = Path(args.data_dir)
     out_dir = Path(args.output_dir)
     models = list(REGISTRY.keys()) if args.model == "all" else [args.model]
 
     print(f"\n{'='*60}")
-    print(f"Loading datasets from {data_dir}")
-    df_all = load_all(data_dir)
-    summarize(df_all)
-
-    # Group by dataset name
-    datasets: dict[str, pl.DataFrame] = {
-        name: df_all.filter(pl.col("dataset") == name)
-        for name in df_all["dataset"].unique().to_list()
-    }
-    # Add a combined split for the main Phillips datasets
-    phillips_df = df_all.filter(pl.col("dataset").str.starts_with("phillips"))
-    if len(phillips_df) > 0:
-        datasets["phillips_all"] = phillips_df
+    if args.data_file:
+        # Curated single-file dataset (filtered_data.csv from S3)
+        print(f"Loading curated dataset from {args.data_file}")
+        df_all = load_curated(Path(args.data_file))
+        summarize(df_all)
+        datasets: dict[str, pl.DataFrame] = {"curated": df_all}
+    else:
+        data_dir = Path(args.data_dir)
+        print(f"Loading datasets from {data_dir}")
+        df_all = load_all(data_dir)
+        summarize(df_all)
+        # Group by dataset name
+        datasets = {
+            name: df_all.filter(pl.col("dataset") == name)
+            for name in df_all["dataset"].unique().to_list()
+        }
+        # Add a combined split for the main Phillips datasets
+        phillips_df = df_all.filter(pl.col("dataset").str.starts_with("phillips"))
+        if len(phillips_df) > 0:
+            datasets["phillips_all"] = phillips_df
 
     for model_key in models:
         print(f"\n{'='*60}")
@@ -87,7 +101,7 @@ def run(args: argparse.Namespace) -> None:
                 raw = np.load(raw_path)
             else:
                 print(f"  [{ds_name}] extracting embeddings for {len(df)} sequences...")
-                seqs = get_sequences(df, use_paired=True)
+                seqs = get_sequences(df, cfg)
                 raw = extract_embeddings(seqs, tok, model, cfg, batch_size=BATCH_SIZE)
                 np.save(raw_path, raw)
                 print(f"  [{ds_name}] saved raw embeddings → {raw_path}  shape={raw.shape}")
@@ -132,8 +146,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract AbLM embeddings for all DMS datasets.")
     parser.add_argument(
         "--data-dir",
-        required=True,
+        default=None,
         help="Path to DMS_Data directory containing dataset subdirectories.",
+    )
+    parser.add_argument(
+        "--data-file",
+        default=None,
+        help="Path to the curated single-file dataset (e.g. curated_data/filtered_data.csv). "
+        "Takes precedence over --data-dir.",
     )
     parser.add_argument(
         "--output-dir",
@@ -158,7 +178,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Recompute and overwrite existing embedding files.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.data_file and not args.data_dir:
+        parser.error("provide --data-file (curated CSV) or --data-dir (DMS_Data directory)")
+    return args
 
 
 if __name__ == "__main__":
