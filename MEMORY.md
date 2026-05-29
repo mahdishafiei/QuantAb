@@ -99,7 +99,7 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 | Quantum framework | PennyLane | Python-native, strong ML integration, good tutorials, quantum kernel support built-in |
 | Primary metric | Spearman ρ | Rank correlation is robust to scale; standard in binding prediction benchmarks |
 | Core analysis | Learning curves | Directly tests the small-data hypothesis; publishable regardless of outcome |
-| Hackathon qubit counts | (6,6), (8,8), (10,10) per register | Two registers (ab + target); total 12/16/20 qubits. Tractable on CPU/GPU. |
+| Hackathon qubit counts | (6,6) and (10,10) per register | 12 and 20 total qubits. (8,8)=16 dropped (not a useful scaling point). 28 qubits (14+14) reserved for paper, GPU only. |
 | Antibody model | IgBERT (preferred) or BALM | Must accept **paired VH+VL** — never embed chains separately |
 | Target model | ESM2 | Standard protein LM; pooled sequence embedding |
 | Embedding pipeline | Separate extraction → separate normalize → separate PCA → two-register quantum / concatenate classical | Modalities are heterogeneous; joint PCA without normalization is dominated by largest space |
@@ -113,6 +113,40 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 ---
 
 ## Discussion log
+
+### 2026-05-29 — Dataset curation and architecture revision (Benjamin + Claude)
+
+**DMS data curated.** Five datasets processed from `DMS_Data/` into standardised schema
+(`hc_seq, lc_seq, target_seq, kd_nm, source, antibody, antigen, notes`). Script: `scripts/curate_dms_data.py`.
+After filtering incomplete rows (no target, no LC, no KD): **71,239 rows** in `curated_data/filtered_data.csv`.
+Data lives on S3 — both local data dirs are gitignored:
+- Raw DMS: `s3://scrippsresearch-mshafiei-hackathon/DMS_Data/`
+- Curated: `s3://scrippsresearch-mshafiei-hackathon/curated_data/filtered_data.csv`
+
+| Source | Rows | Notes |
+|--------|------|-------|
+| Phillips 2021 | 66,112 | CR9114/CR6261 vs H1/H3 HA — full VH+VL |
+| Dailey | 4,974 | CR9114 single-mutants vs H1/H3 HA — VH/VL from PDB |
+| MAGMA-seq | 153 | 4A8/CC121 vs SARS-CoV-2 RBD — VH/VL from PDB |
+
+**⚠ DATA IMBALANCE — action required before embedding extraction.**
+Phillips is 93% of the data (one antibody lineage against one antigen family). Pooling without
+balancing makes all metrics Phillips-dominated and scientifically misleading. Data input will be
+modified. Options: stratified cap per source (~5k rows each) OR cross-distribution split
+(train on Phillips, test generalization on Dailey + MAGMA-seq). The cross-dataset framing
+is the stronger scientific story and naturally tests the small-data hypothesis.
+
+**Architecture revised for actual dataset size (71k rows):**
+- Qubit plan: hackathon uses **(6,6)=12 and (10,10)=20** only. (8,8)=16 dropped (not a useful
+  scaling point). (14,14)=28 reserved for paper, GPU required.
+- Quantum kernel ceiling: N≈2000 training samples on CPU (20 qubits ≈ 2h). Stay ≤2000 for
+  quantum; classical baselines can use full N.
+- PCA dims: no longer data-limited at 71k rows. Set by explained variance elbow on actual
+  embeddings (expect ~30–60 PCs for IgBERT). Do not fix in advance.
+- Learning curves: N = 50, 100, 200, 500, 1000, 2000.
+- "Small-data" framing recovers via cross-distribution generalization, not random subsampling.
+
+---
 
 ### 2026-05-29 — Pipeline slides created (Benjamin + Claude)
 
