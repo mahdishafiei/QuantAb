@@ -11,11 +11,12 @@ that classical kernels miss — especially in the small-labeled-data regime typi
 affinity prediction?
 
 This project applies quantum machine learning to antibody-antigen affinity prediction. Antibody
-sequences are encoded as embeddings via two language models — the antibody-specific
-[IgBERT](https://huggingface.co/Exscientia/IgBert) and the general protein model
-[ESM-2](https://huggingface.co/facebook/esm2_t33_650M_UR50D) — then compressed to low
-dimensions via PCA, and evaluated using quantum kernel SVMs versus classical baselines across
-a range of training set sizes (learning curves).
+sequences are encoded as embeddings via three language models — the antibody-specific
+[IgBERT](https://huggingface.co/Exscientia/IgBert), the general protein model
+[ESM-2](https://huggingface.co/facebook/esm2_t33_650M_UR50D), and the natively-paired
+antibody model [BALM-paired](https://huggingface.co/brineylab/BALM-paired) (Burbach & Briney
+2024) — then compressed to low dimensions via PCA, and evaluated using quantum kernel SVMs
+versus classical baselines across a range of training set sizes (learning curves).
 
 ---
 
@@ -27,8 +28,8 @@ a range of training set sizes (learning curves).
 
 A secondary question this project uniquely addresses:
 
-> Does any quantum kernel advantage depend on the embedding model — antibody-specific (IgBERT)
-> vs. general protein (ESM-2)?
+> Does any quantum kernel advantage depend on the embedding model — antibody-specific (IgBERT),
+> general protein (ESM-2), or natively-paired (BALM-paired)?
 
 ---
 
@@ -38,8 +39,9 @@ A secondary question this project uniquely addresses:
 Antibody sequences
       ↓
 AbLM embeddings
-  ├── IgBERT  (antibody-specific, 1024-dim, [CLS] pooling)
-  └── ESM-2   (general protein,   480-dim,  mean pooling)
+  ├── IgBERT        (antibody-specific,  1024-dim, [CLS] pooling)
+  ├── ESM-2 650M    (general protein,   1280-dim,  mean pooling)
+  └── BALM-paired   (natively-paired,   1024-dim, [CLS] pooling)
       ↓
 PCA reduction  →  6 or 10 dimensions  (= qubit count)
       ↓
@@ -106,7 +108,7 @@ Options:
 ```
 --data-dir      Path to the DMS_Data directory (required)
 --output-dir    Where to save embeddings (default: embeddings/)
---model         igbert | esm2_35M | esm2_150M | esm2_650M | all  (default: all)
+--model         igbert | esm2_35M | esm2_150M | esm2_650M | balm_paired | all  (default: all)
 --n-components  PCA dimensions to compute, e.g. --n-components 6 10  (default: 6 10)
 --overwrite     Force recompute even if files exist
 ```
@@ -121,8 +123,11 @@ embeddings/
     phillips_all_labels.npy   # affinity y    (N,)
     engelhart_...npy
     ...
-  esm2_35M/
-    phillips_all_raw.npy      # raw 480-dim
+  esm2_650M/
+    phillips_all_raw.npy      # raw 1280-dim
+    ...
+  balm_paired/
+    phillips_all_raw.npy      # raw 1024-dim  (paired heavy+light)
     ...
 ```
 
@@ -138,7 +143,7 @@ Options:
 ```
 --embeddings-dir   Directory with embedding files (default: embeddings/)
 --results-dir      Where to save results (default: results/)
---model            igbert | esm2_35M | esm2_150M | esm2_650M | all  (default: all)
+--model            igbert | esm2_35M | esm2_150M | esm2_650M | balm_paired | all  (default: all)
 --dataset          Specific dataset name(s) to run
 --n-components     PCA dims to evaluate, e.g. --n-components 6 10
 --no-quantum       Skip quantum kernels (much faster, classical only)
@@ -176,7 +181,7 @@ df = load_all(DATA_DIR)
 summarize(df)
 
 # Extract embeddings
-tok, model, cfg = load_model("igbert")   # or "esm2_650M"
+tok, model, cfg = load_model("igbert")   # or "esm2_650M", "balm_paired"
 X, y, pca = embed_and_reduce(
     df, tok, model, cfg,
     n_components=10,
@@ -215,7 +220,7 @@ QuantAb/
 ├── quantab/               # Core Python package
 │   ├── __init__.py        # Clean public API
 │   ├── data.py            # DMS dataset loaders
-│   ├── embeddings.py      # IgBERT + ESM-2 extraction, PCA, model registry
+│   ├── embeddings.py      # IgBERT, ESM-2, BALM-paired extraction, PCA, model registry
 │   ├── quantum_kernels.py # PennyLane quantum kernel implementations
 │   ├── classical.py       # sklearn classical baselines
 │   ├── evaluation.py      # Learning curves, CV, Spearman metric
@@ -232,6 +237,15 @@ QuantAb/
 ├── CLAUDE.md              # Claude Code collaboration guide
 └── MEMORY.md              # Design decisions and discussion log
 ```
+
+---
+
+## References
+
+- Leem J. et al. (2022). IgBERT: antibody language model. *Bioinformatics*.
+- Lin Z. et al. (2023). Evolutionary-scale prediction of atomic level protein structure with a language model. *Science* **379**, 1123–1130.
+- Burbach S.M. & Briney B. (2024). Improving antibody language models with native pairing. *Patterns*. https://doi.org/10.1016/j.patter.2024.100967
+- Phillips A.M. et al. (2021). Binding affinity landscapes constrain the evolution of broadly neutralizing anti-influenza antibodies. *eLife*.
 
 ---
 

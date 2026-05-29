@@ -6,8 +6,9 @@ QuantAb tests whether quantum kernel methods outperform classical kernels (SVM, 
 when predicting antibody binding affinity from language model embeddings — especially in the
 small-labeled-data regime that is typical of real antibody engineering campaigns.
 
-Pipeline: antibody sequences → IgBERT embeddings (1024-dim) → PCA (6 or 10 dims) →
-quantum kernel SVM or classical kernel SVM → Spearman correlation with measured KD.
+Pipeline: antibody sequences → AbLM embeddings (IgBERT 1024-dim / ESM-2 1280-dim /
+BALM-paired 1024-dim) → PCA (6 or 10 dims) → quantum kernel SVM or classical kernel SVM
+→ Spearman correlation with measured KD.
 
 The central analysis is **learning curves**: how does each method's Spearman ρ change as
 training set size grows from 20 to 500+ examples?
@@ -33,7 +34,7 @@ Key package versions: PennyLane 0.45, polars 1.39, torch 2.11+cu130, transformer
 QuantAb/
 ├── quantab/
 │   ├── data.py            # Dataset loaders → (heavy, light, affinity, dataset) DataFrames
-│   ├── embeddings.py      # IgBERT extraction + PCA
+│   ├── embeddings.py      # IgBERT / ESM-2 / BALM-paired extraction + PCA
 │   ├── quantum_kernels.py # PennyLane quantum kernels (minimal + expressive)
 │   ├── classical.py       # Sklearn classical baselines
 │   ├── evaluation.py      # Learning curves, k-fold CV, Spearman metric
@@ -85,23 +86,28 @@ summarize(df)
 
 ## Embedding models
 
-Two models are supported via a unified interface in `quantab/embeddings.py`:
+Five models are supported via a unified interface in `quantab/embeddings.py`:
 
 | Key | Model | Type | Dim | Input format | Pooling |
 |---|---|---|---|---|---|
 | `igbert` | `Exscientia/IgBert` | Antibody-specific | 1024 | Space-separated AAs | [CLS] |
 | `esm2_35M` | `facebook/esm2_t12_35M_UR50D` | General protein | 480 | Raw sequence | Mean |
 | `esm2_150M` | `facebook/esm2_t30_150M_UR50D` | General protein | 640 | Raw sequence | Mean |
+| `esm2_650M` | `facebook/esm2_t33_650M_UR50D` | General protein | 1280 | Raw sequence | Mean |
+| `balm_paired` | `brineylab/BALM-paired` | Natively-paired antibody | 1024 | (heavy, light) pair | [CLS] |
 
-The IgBERT vs ESM-2 comparison is scientifically central: does antibody-specific pretraining
-give quantum kernels better structure to exploit?
+The IgBERT vs ESM-2 vs BALM-paired comparison is scientifically central: does antibody-specific
+or natively-paired pretraining give quantum kernels better structure to exploit?
+
+Note: `balm_paired` receives heavy and light chains as separate sequences (RoBERTa two-sequence
+input). Concatenation is NOT used. For sequences without a light chain, an empty string is passed.
 
 ```python
 from quantab.embeddings import load_model, embed_and_reduce, REGISTRY
 from pathlib import Path
 
 # Load any model by key
-tok, model, cfg = load_model("igbert")       # or "esm2_35M", "esm2_150M"
+tok, model, cfg = load_model("igbert")       # or "esm2_650M", "balm_paired"
 
 X, y, pca = embed_and_reduce(
     df,
