@@ -1,0 +1,10 @@
+data/
+embeddings/
+results/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+build/
+.env

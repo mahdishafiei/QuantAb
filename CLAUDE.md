@@ -1,86 +1,198 @@
-# CLAUDE.md — Instructions for Claude Code
+# CLAUDE.md — QuantAb Project Guide
 
-## Project context
+## What this project does
 
-QuantAb explores whether quantum kernel methods can extract binding-relevant signal from antibody language model (AbLM) embeddings that classical kernels miss, particularly in the small-labeled-data regime typical of affinity prediction.
+QuantAb tests whether quantum kernel methods outperform classical kernels (SVM, random forest)
+when predicting antibody binding affinity from language model embeddings — especially in the
+small-labeled-data regime that is typical of real antibody engineering campaigns.
 
-This is a Briney Lab project at The Scripps Research Institute, originating from a hackathon with AWS compute support.
+Pipeline: antibody sequences → IgBERT embeddings (1024-dim) → PCA (6 or 10 dims) →
+quantum kernel SVM or classical kernel SVM → Spearman correlation with measured KD.
 
-## Codebase conventions
+The central analysis is **learning curves**: how does each method's Spearman ρ change as
+training set size grows from 20 to 500+ examples?
 
-- **Python only.** All analysis code in Python 3.11+.
-- **Polars, not pandas.** Use `polars` for all tabular data manipulation. Never use pandas.
-- **Pathlib always.** Use `from pathlib import Path` for all file handling. No `os.path`.
-- **Progress bars.** Use `from tqdm.auto import tqdm` for any loop or batch operation.
-- **Idempotent scripts.** Every pipeline script should be safe to re-run. Check for existing outputs, use deterministic seeds, skip completed steps.
-- **Type hints.** Use type hints on all function signatures.
-- **Docstrings.** Google-style docstrings on all public functions and classes.
+---
 
-## Project structure
+## Environment
+
+Everything runs in the base conda environment on this server. All dependencies are installed.
+
+```bash
+# Verify
+python -c "import pennylane, polars, sklearn, transformers, torch; print('ok')"
+```
+
+Key package versions: PennyLane 0.45, polars 1.39, torch 2.11+cu130, transformers 5.5.
+
+---
+
+## Repository layout
 
 ```
 QuantAb/
-├── README.md
-├── PLAN.md
-├── CLAUDE.md
-├── MEMORY.md
-├── data/                  # DMS datasets (not committed — .gitignore)
-├── embeddings/            # Extracted embeddings (not committed — .gitignore)
-├── notebooks/             # Jupyter notebooks for exploration and visualization
-│   └── 01_embedding_extraction.ipynb
-│   └── 02_quantum_kernels.ipynb
-│   └── 03_classical_baselines.ipynb
-│   └── 04_learning_curves.ipynb
-│   └── 05_results_visualization.ipynb
-├── quantab/               # Python package
-│   ├── __init__.py
-│   ├── embeddings.py      # AbLM embedding extraction and PCA
-│   ├── quantum_kernels.py # PennyLane quantum kernel implementations
-│   ├── classical.py       # Classical kernel baselines
-│   ├── evaluation.py      # Cross-validation, learning curves, metrics
-│   └── visualization.py   # Plotting and figure generation
-├── scripts/               # Standalone pipeline scripts
-│   ├── extract_embeddings.py
-│   ├── run_quantum_experiment.py
+├── quantab/
+│   ├── data.py            # Dataset loaders → (heavy, light, affinity, dataset) DataFrames
+│   ├── embeddings.py      # IgBERT extraction + PCA
+│   ├── quantum_kernels.py # PennyLane quantum kernels (minimal + expressive)
+│   ├── classical.py       # Sklearn classical baselines
+│   ├── evaluation.py      # Learning curves, k-fold CV, Spearman metric
+│   └── visualization.py   # Matplotlib figure generation
+├── scripts/
+│   ├── extract_embeddings.py     # Run IgBERT on all datasets → save to embeddings/
+│   ├── run_quantum_experiment.py # Load embeddings → quantum kernel learning curves
 │   ├── run_classical_baselines.py
 │   └── generate_figures.py
-├── results/               # Experiment outputs (not committed — .gitignore)
-├── figures/               # Generated figures
-├── pyproject.toml
-└── .gitignore
+├── notebooks/
+│   ├── 01_embedding_extraction.ipynb
+│   ├── 02_quantum_kernels.ipynb
+│   ├── 03_classical_baselines.ipynb
+│   ├── 04_learning_curves.ipynb
+│   └── 05_results_visualization.ipynb
+├── data/        # DMS datasets — NOT committed (see paths below)
+├── embeddings/  # Cached IgBERT embeddings — NOT committed
+├── results/     # Experiment outputs — NOT committed
+└── figures/     # Generated figures — committed
 ```
 
-## Key dependencies
+---
 
-- `pennylane` — Quantum ML framework (circuits, kernels, simulation)
-- `scikit-learn` — SVM, cross-validation, metrics
-- `polars` — Data manipulation
-- `transformers` — HuggingFace model loading for AbLM checkpoints
-- `torch` — Backend for embedding extraction
-- `matplotlib` / `seaborn` — Visualization
-- `scipy` — Spearman correlation, statistical tests
+## Dataset paths (server-local, not in repo)
+
+All DMS datasets live at: `/home/jovyan/work/Hackaton/DMS_Data/`
+
+| Directory | Dataset | Format | Key columns | N variants |
+|---|---|---|---|---|
+| `02_phillips_cr9114_cr6261/` | Phillips et al. 2021 CR9114 anti-influenza DMS | CSV | `heavy`, `light`, `*_neg_log_kd` | ~67,000 |
+| `05_engelhart_aayl/` | Engelhart et al. AAYL antibody variants | CSV | `heavy_chain_seq`, `binding_score`, `light_chain_seq` | ~varies |
+| `06_shanehsazzadeh_trastuzumab/` | Shanehsazzadeh trastuzumab zero-shot binders | CSV | `HCDR3`, `-log(KD (M))` | 422 |
+| `01_dailey_cr9114/` | Dailey CR9114 single-point mutants | CSV | `mut`, `minus_log_Kd` | ~varies |
+| `03_magma_seq/` | MAGMA-seq data | Mixed | See SD files | — |
+| `04_adams_4420/` | Adams et al. titeseq | CSV | See 16_titeseq/ subdir | — |
+
+Load all datasets in one call:
+
+```python
+from pathlib import Path
+from quantab.data import load_all, summarize
+
+DATA_DIR = Path("/home/jovyan/work/Hackaton/DMS_Data")
+df = load_all(DATA_DIR)
+summarize(df)
+```
+
+---
+
+## Embedding model
+
+**IgBERT** — `Exscientia/IgBert` (HuggingFace)
+- BERT-based antibody language model, 1024-dim hidden states
+- Input: space-separated amino acids (`"E V Q L V E S..."`)
+- Output: [CLS] token embedding used as sequence representation
+- Downloaded automatically on first use; cached in `~/.cache/huggingface/`
+
+```python
+from quantab.embeddings import load_igbert, embed_and_reduce
+from pathlib import Path
+
+tok, model = load_igbert()   # loads to GPU if available, else CPU
+X, y, pca = embed_and_reduce(
+    df,
+    tok,
+    model,
+    n_components=10,           # PCA dims = n_qubits
+    cache_path=Path("embeddings/phillips_10d.npy"),  # saves raw embeddings
+)
+```
+
+Always use `cache_path` for large datasets — IgBERT on 67k sequences takes ~30 min on CPU.
+
+---
+
+## Quantum kernels
+
+Two architectures, both in `quantab/quantum_kernels.py`:
+
+| Name | Circuit | Use |
+|---|---|---|
+| `quantum_minimal` | Angle encoding + 1 CNOT layer | Baseline quantum |
+| `quantum_expressive` | Angle encoding + 2 repeated Ry+CNOT layers | More expressive |
+
+```python
+from quantab.quantum_kernels import build_minimal_kernel, build_expressive_kernel
+
+k = build_minimal_kernel(n_qubits=6)   # n_qubits must match PCA n_components
+k(x1, x2)  # returns scalar in [0, 1]
+```
+
+Kernel matrix computation is O(N²) — use subsampled datasets (≤500 points) for experiments.
+Simulator: `lightning.qubit` (fast CPU statevector).
+
+---
+
+## Classical baselines
+
+```python
+from quantab.classical import MODELS
+
+# Available: "linear_svm", "rbf_svm", "poly_svm", "random_forest"
+model = MODELS["rbf_svm"]()
+model.fit(X_train, y_train)
+```
+
+---
+
+## Evaluation
+
+Primary metric: **Spearman rank correlation** between predicted and measured affinity.
+
+```python
+from quantab.evaluation import learning_curve, evaluate_classical
+
+# Classical learning curve
+results = learning_curve(
+    MODELS["rbf_svm"](),
+    X, y,
+    train_sizes=[20, 50, 100, 200, 500],
+    is_quantum=False,
+)
+
+# Quantum learning curve
+from quantab.quantum_kernels import build_minimal_kernel
+results = learning_curve(
+    build_minimal_kernel(n_qubits=6),
+    X, y,
+    train_sizes=[20, 50, 100, 200],
+    is_quantum=True,
+)
+```
+
+---
+
+## Hackathon deliverables (MVP)
+
+1. Embedding extraction on Phillips + Engelhart datasets → cached `.npy` files
+2. Learning curves for: `quantum_minimal`, `quantum_expressive`, `linear_svm`, `rbf_svm`, `random_forest`
+3. Two PCA dimensions: 6 and 10 qubits
+4. Summary figure: Spearman ρ vs training set size, all methods on one plot
+5. Scatter plot: best method predicted vs measured affinity
+
+---
 
 ## Scientific constraints
 
-- **Primary metric:** Spearman rank correlation between predicted and measured binding affinity.
-- **All comparisons must use identical reduced features.** Same PCA projection for quantum and classical arms. The only variable is the kernel/model.
-- **Deterministic seeds everywhere.** Set `random_state` / `seed` in all stochastic operations. Default seed: 42.
-- **Learning curves are the core analysis.** Every method must be evaluated across a range of training set sizes (e.g., 20, 50, 100, 200, full).
-- **Never overfit to one dataset.** Hackathon uses 1 DMS dataset; paper will generalize to multiple. Keep code dataset-agnostic.
+- **Same PCA projection for all methods** — only the kernel/model varies, nothing else.
+- **Deterministic seeds everywhere.** Default seed: 42.
+- **Never leak test data** — always split before fitting PCA.
+- **Primary metric is Spearman ρ**, not RMSE or R².
 
-## Tone and communication
+---
 
-This repo will be shared with labmates and PI. Code should be clean, well-documented, and presentation-ready. Notebooks should have clear markdown explanations between cells. Figures should be publication-quality from the start.
+## Conventions
 
-## What to prioritize
-
-1. Get embedding extraction working first (this unblocks everything)
-2. Get one quantum kernel + one classical baseline running end-to-end
-3. Learning curve analysis
-4. Then iterate: more kernels, more qubits, more models
-
-## What to avoid
-
-- Don't over-engineer infrastructure before we have results
-- Don't chase quantum advantage claims — we're benchmarking, not advocating
-- Don't use Qiskit unless there's a specific reason — PennyLane is the primary framework
+- **Polars, not pandas** for all tabular data.
+- **Pathlib** for all file paths.
+- **tqdm.auto** for any loop over sequences or batches.
+- **Type hints** on all function signatures.
+- **Google-style docstrings** on all public functions.
+- Scripts must be idempotent (check for existing outputs, skip if present).
