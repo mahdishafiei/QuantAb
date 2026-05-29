@@ -98,6 +98,7 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 |----------|--------|-----------|
 | Quantum framework | PennyLane | Python-native, strong ML integration, good tutorials, quantum kernel support built-in |
 | Primary metric | Spearman ρ | Rank correlation is robust to scale; standard in binding prediction benchmarks |
+| Prediction target | Regression on log₁₀(KD/M) per dataset | = `-(log10(kd_nm) - 9)`. Continuous regression, not binary. Evaluated with Spearman ρ + RMSE. Never predict absolute KD across datasets (assay dynamic ranges are incomparable). |
 | Core analysis | Learning curves | Directly tests the small-data hypothesis; publishable regardless of outcome |
 | Hackathon qubit counts | (6,6) and (10,10) per register | 12 and 20 total qubits. (8,8)=16 dropped (not a useful scaling point). 28 qubits (14+14) reserved for paper, GPU only. |
 | Antibody model | IgBERT (preferred) or BALM | Must accept **paired VH+VL** — never embed chains separately |
@@ -145,6 +146,19 @@ is the stronger scientific story and naturally tests the small-data hypothesis.
   embeddings (expect ~30–60 PCs for IgBERT). Do not fix in advance.
 - Learning curves: N = 50, 100, 200, 500, 1000, 2000.
 - "Small-data" framing recovers via cross-distribution generalization, not random subsampling.
+
+---
+
+### 2026-05-29 — Prediction target: regression on log₁₀(KD/M) (Benjamin + Claude)
+
+**Decision: regression, not binary classification.**
+
+- Predict **log₁₀(KD/M)** per dataset separately. In code: `target = -(log10(kd_nm) - 9)` = `-log10(kd_nm * 1e-9)`.
+- Primary metric: Spearman ρ (rank correlation — robust to scale, directly answers "does the model rank variants correctly?").
+- Secondary metric: RMSE on log₁₀(KD/M).
+- Implementation: kernel ridge regression (KRR) or SVR with the quantum/classical kernel matrix. Both are in scikit-learn.
+- **Never pool regression targets across datasets.** Phillips, Dailey, MAGMA-seq were measured by different labs on different instruments with different dynamic ranges (Phillips caps at 1000 nM; MAGMA-seq goes to 20,000 nM). Cross-dataset absolute KD comparison is meaningless. Evaluate each dataset separately; use Spearman ρ for any cross-dataset summary (rank-invariant to scale differences).
+- Binary classification was rejected: arbitrary threshold required, introduces class imbalance (Phillips piles up at detection floor), and discards the quantitative signal we worked to curate.
 
 ---
 
