@@ -74,15 +74,11 @@ continuous binding measurements (KD or enrichment score):
 ## Installation
 
 ```bash
-git clone git@github.com:mahdishafiei/QuantAb.git
+git clone git@github.com:brineylab/QuantAb.git
 cd QuantAb
 pip install -r requirements.txt
 pip install -e .
 ```
-
-> **Note:** `torch` is installed as a CPU build by default. For GPU acceleration,
-> install the appropriate CUDA version first:
-> `pip install torch --index-url https://download.pytorch.org/whl/cu118`
 
 Verify the install:
 
@@ -133,83 +129,17 @@ embeddings/
 
 ### Step 2 — Run experiments
 
-Compute learning curves for all methods (quantum + classical) on the extracted embeddings.
+Two arms are evaluated separately as learning curves:
 
 ```bash
+# Classical arm — SVM / random-forest baselines
+python scripts/run_experiments.py --no-quantum
+
+# Quantum arm — quantum kernel SVMs (adds the quantum kernels)
 python scripts/run_experiments.py
 ```
 
-Options:
-```
---embeddings-dir   Directory with embedding files (default: embeddings/)
---results-dir      Where to save results (default: results/)
---model            igbert | esm2_35M | esm2_150M | esm2_650M | balm_paired | all  (default: all)
---dataset          Specific dataset name(s) to run
---n-components     PCA dims to evaluate, e.g. --n-components 6 10
---no-quantum       Skip quantum kernels (much faster, classical only)
---overwrite        Rerun even if result files exist
-```
-
-For a quick test run (classical only, small dataset):
-```bash
-python scripts/run_experiments.py \
-    --model esm2_650M \
-    --dataset trastuzumab_zero_shot \
-    --n-components 6 \
-    --no-quantum
-```
-
-### Step 3 — Generate figures
-
-```bash
-python scripts/generate_figures.py
-```
-
-Saves one learning curve figure per result file to `figures/`.
-
----
-
-## Programmatic API
-
-```python
-from pathlib import Path
-from quantab import load_all, summarize, load_model, embed_and_reduce
-
-# Load datasets
-DATA_DIR = Path("/path/to/DMS_Data")
-df = load_all(DATA_DIR)
-summarize(df)
-
-# Extract embeddings
-tok, model, cfg = load_model("igbert")   # or "esm2_650M", "balm_paired"
-X, y, pca = embed_and_reduce(
-    df, tok, model, cfg,
-    n_components=10,
-    cache_path=Path("embeddings/igbert/all_10d.npy"),
-)
-
-# Run learning curve
-from quantab import learning_curve, CLASSICAL_MODELS, build_minimal_kernel
-
-# Classical
-results = learning_curve(
-    CLASSICAL_MODELS["rbf_svm"](),
-    X, y,
-    train_sizes=[20, 50, 100, 200, 500],
-)
-
-# Quantum
-results = learning_curve(
-    build_minimal_kernel(n_qubits=10),
-    X, y,
-    train_sizes=[20, 50, 100, 200],
-    is_quantum=True,
-)
-
-# Plot
-from quantab import plot_learning_curves
-plot_learning_curves({"rbf_svm": results}, title="RBF SVM learning curve")
-```
+Results are written as JSON to `results/`.
 
 ---
 
@@ -227,8 +157,7 @@ QuantAb/
 │   └── visualization.py   # Figure generation
 ├── scripts/
 │   ├── extract_embeddings.py   # Step 1: sequences → cached embeddings
-│   ├── run_experiments.py      # Step 2: embeddings → learning curve results
-│   └── generate_figures.py    # Step 3: results → figures
+│   └── run_experiments.py      # Step 2: embeddings → learning curve results
 ├── notebooks/             # Exploration notebooks
 ├── figures/               # Generated figures (committed)
 ├── requirements.txt
