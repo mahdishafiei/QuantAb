@@ -48,7 +48,7 @@ PCA reduction  (6 or 10 dimensions — matching qubit budget)
 
 | Component | Choice | Notes |
 |---|---|---|
-| Embedding model | IgBERT (`Exscientia/IgBert`) | 1024-dim BERT-based antibody LM |
+| Embedding models | IgBERT (`Exscientia/IgBert`) + ESM-2 (`facebook/esm2_t12_35M_UR50D`) | Antibody-specific vs general protein LM comparison |
 | Dimensionality reduction | PCA | 6 and 10 components (= n_qubits) |
 | Quantum framework | PennyLane `lightning.qubit` | Statevector simulation |
 | Quantum kernels | Minimal ansatz, Expressive ansatz | Angle encoding + CNOT layers |

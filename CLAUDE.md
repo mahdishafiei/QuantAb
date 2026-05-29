@@ -83,29 +83,38 @@ summarize(df)
 
 ---
 
-## Embedding model
+## Embedding models
 
-**IgBERT** — `Exscientia/IgBert` (HuggingFace)
-- BERT-based antibody language model, 1024-dim hidden states
-- Input: space-separated amino acids (`"E V Q L V E S..."`)
-- Output: [CLS] token embedding used as sequence representation
-- Downloaded automatically on first use; cached in `~/.cache/huggingface/`
+Two models are supported via a unified interface in `quantab/embeddings.py`:
+
+| Key | Model | Type | Dim | Input format | Pooling |
+|---|---|---|---|---|---|
+| `igbert` | `Exscientia/IgBert` | Antibody-specific | 1024 | Space-separated AAs | [CLS] |
+| `esm2_35M` | `facebook/esm2_t12_35M_UR50D` | General protein | 480 | Raw sequence | Mean |
+| `esm2_150M` | `facebook/esm2_t30_150M_UR50D` | General protein | 640 | Raw sequence | Mean |
+
+The IgBERT vs ESM-2 comparison is scientifically central: does antibody-specific pretraining
+give quantum kernels better structure to exploit?
 
 ```python
-from quantab.embeddings import load_igbert, embed_and_reduce
+from quantab.embeddings import load_model, embed_and_reduce, REGISTRY
 from pathlib import Path
 
-tok, model = load_igbert()   # loads to GPU if available, else CPU
+# Load any model by key
+tok, model, cfg = load_model("igbert")       # or "esm2_35M", "esm2_150M"
+
 X, y, pca = embed_and_reduce(
     df,
     tok,
     model,
+    cfg,
     n_components=10,           # PCA dims = n_qubits
-    cache_path=Path("embeddings/phillips_10d.npy"),  # saves raw embeddings
+    cache_path=Path("embeddings/phillips_igbert_10d.npy"),
 )
 ```
 
-Always use `cache_path` for large datasets — IgBERT on 67k sequences takes ~30 min on CPU.
+Always use `cache_path` — IgBERT on 67k sequences takes ~30 min on CPU.
+Name cache files as `{dataset}_{model_key}_{n_components}d.npy` for clarity.
 
 ---
 

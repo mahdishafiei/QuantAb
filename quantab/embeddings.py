@@ -1,26 +1,89 @@
-"""IgBERT embedding extraction and PCA dimensionality reduction."""
+"""Antibody language model embedding extraction and PCA dimensionality reduction.
 
+Supported models
+----------------
+igbert   : Exscientia/IgBert   — antibody-specific BERT, 1024-dim
+esm2_35M : facebook/esm2_t12_35M_UR50D  — general protein ESM-2, 480-dim
+esm2_150M: facebook/esm2_t30_150M_UR50D — general protein ESM-2, 640-dim
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
 import numpy as np
 import torch
-from tqdm.auto import tqdm
-from transformers import AutoTokenizer, AutoModel
 from sklearn.decomposition import PCA
+from tqdm.auto import tqdm
+from transformers import AutoModel, AutoTokenizer
+
 import polars as pl
 
-MODEL_NAME = "Exscientia/IgBert"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def _space_sep(seq: str) -> str:
-    return " ".join(seq.strip())
+@dataclass
+class ModelConfig:
+    hf_name: str
+    hidden_dim: int
+    space_sep: bool      # True → join("E V Q L..."), False → raw sequence
+    pool: str            # "cls" or "mean"
 
 
-def load_igbert(device: str = DEVICE):
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModel.from_pretrained(MODEL_NAME).to(device).eval()
-    return tokenizer, model
+REGISTRY: dict[str, ModelConfig] = {
+    "igbert": ModelConfig(
+        hf_name="Exscientia/IgBert",
+        hidden_dim=1024,
+        space_sep=True,
+        pool="cls",
+    ),
+    "esm2_35M": ModelConfig(
+        hf_name="facebook/esm2_t12_35M_UR50D",
+        hidden_dim=480,
+        space_sep=False,
+        pool="mean",
+    ),
+    "esm2_150M": ModelConfig(
+        hf_name="facebook/esm2_t30_150M_UR50D",
+        hidden_dim=640,
+        space_sep=False,
+        pool="mean",
+    ),
+}
+
+
+def load_model(model_key: str, device: str = DEVICE):
+    """Load tokenizer and model by registry key.
+
+    Args:
+        model_key: One of "igbert", "esm2_35M", "esm2_150M".
+        device: torch device string.
+
+    Returns:
+        (tokenizer, model, config)
+    """
+    if model_key not in REGISTRY:
+        raise ValueError(f"Unknown model '{model_key}'. Choose from: {list(REGISTRY)}")
+    cfg = REGISTRY[model_key]
+    tokenizer = AutoTokenizer.from_pretrained(cfg.hf_name)
+    model = AutoModel.from_pretrained(cfg.hf_name).to(device).eval()
+    return tokenizer, model, cfg
+
+
+def _prepare(seq: str, space_sep: bool) -> str:
+    return " ".join(seq.strip()) if space_sep else seq.strip()
+
+
+def _pool(hidden: torch.Tensor, attention_mask: torch.Tensor, strategy: str) -> np.ndarray:
+    if strategy == "cls":
+        return hidden[:, 0, :].cpu().float().numpy()
+    # mean pooling over non-padding tokens
+    mask = attention_mask.unsqueeze(-1).float()
+    summed = (hidden * mask).sum(dim=1)
+    counts = mask.sum(dim=1).clamp(min=1e-9)
+    return (summed / counts).cpu().float().numpy()
 
 
 @torch.no_grad()
@@ -28,26 +91,28 @@ def extract_embeddings(
     sequences: list[str],
     tokenizer,
     model,
+    cfg: ModelConfig,
     batch_size: int = 32,
     device: str = DEVICE,
     max_length: int = 512,
 ) -> np.ndarray:
-    """Extract [CLS] embeddings from IgBERT for a list of sequences.
+    """Extract embeddings for a list of sequences.
 
     Args:
-        sequences: List of amino acid sequences (raw, no spaces needed).
-        tokenizer: IgBERT tokenizer.
-        model: IgBERT model.
+        sequences: Raw amino acid sequences.
+        tokenizer: HuggingFace tokenizer.
+        model: HuggingFace model.
+        cfg: ModelConfig for this model.
         batch_size: Sequences per forward pass.
         device: torch device string.
-        max_length: Max token length (truncates longer sequences).
+        max_length: Maximum token length (truncates longer sequences).
 
     Returns:
-        Float32 array of shape (N, 768).
+        Float32 array of shape (N, hidden_dim).
     """
-    all_embeddings = []
-    for i in tqdm(range(0, len(sequences), batch_size), desc="Extracting embeddings"):
-        batch = [_space_sep(s) for s in sequences[i : i + batch_size]]
+    all_embeddings: list[np.ndarray] = []
+    for i in tqdm(range(0, len(sequences), batch_size), desc=f"Extracting ({cfg.hf_name.split('/')[-1]})"):
+        batch = [_prepare(s, cfg.space_sep) for s in sequences[i : i + batch_size]]
         enc = tokenizer(
             batch,
             return_tensors="pt",
@@ -56,9 +121,8 @@ def extract_embeddings(
             max_length=max_length,
         ).to(device)
         out = model(**enc)
-        # [CLS] token is index 0
-        cls_emb = out.last_hidden_state[:, 0, :].cpu().float().numpy()
-        all_embeddings.append(cls_emb)
+        emb = _pool(out.last_hidden_state, enc["attention_mask"], cfg.pool)
+        all_embeddings.append(emb)
     return np.vstack(all_embeddings)
 
 
@@ -72,21 +136,23 @@ def embed_and_reduce(
     df: pl.DataFrame,
     tokenizer,
     model,
+    cfg: ModelConfig,
     n_components: int = 10,
     batch_size: int = 32,
     use_paired: bool = True,
     cache_path: Optional[Path] = None,
 ) -> tuple[np.ndarray, np.ndarray, PCA]:
-    """Full pipeline: sequences → IgBERT embeddings → PCA → (X, y).
+    """Full pipeline: sequences → embeddings → PCA → (X, y).
 
     Args:
         df: DataFrame with columns heavy, light (optional), affinity.
-        tokenizer: IgBERT tokenizer.
-        model: IgBERT model.
-        n_components: PCA output dimensions.
-        batch_size: IgBERT batch size.
-        use_paired: If True and light column exists, concatenate heavy+light.
-        cache_path: If provided, save/load raw embeddings from this .npy file.
+        tokenizer: HuggingFace tokenizer.
+        model: HuggingFace model.
+        cfg: ModelConfig for this model.
+        n_components: PCA output dimensions (= n_qubits).
+        batch_size: Forward pass batch size.
+        use_paired: If True and light column is present, concatenate heavy+light.
+        cache_path: Save/load raw embeddings here to avoid re-running.
 
     Returns:
         X: PCA-reduced features (N, n_components).
@@ -106,7 +172,7 @@ def embed_and_reduce(
         else:
             sequences = df["heavy"].to_list()
 
-        raw = extract_embeddings(sequences, tokenizer, model, batch_size=batch_size)
+        raw = extract_embeddings(sequences, tokenizer, model, cfg, batch_size=batch_size)
 
         if cache_path is not None:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
