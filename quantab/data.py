@@ -105,6 +105,76 @@ def load_curated(path: Path) -> pl.DataFrame:
     )
 
 
+def _clean_seq(s: Optional[str]) -> Optional[str]:
+    """Uppercase and strip non-letter characters from a protein sequence."""
+    if s is None:
+        return None
+    s = "".join(ch for ch in str(s).strip().upper() if ch.isalpha())
+    return s if s else None
+
+
+def load_andd(
+    path: Path,
+    sheet: str = "Sheet3",
+    kd_lo: float = 1e-12,
+    kd_hi: float = 1e-3,
+    drop_predicted: bool = True,
+    min_heavy: int = 50,
+    min_antigen: int = 20,
+) -> pl.DataFrame:
+    """Load Terrence's unified ANDD antibody/nanobody–antigen affinity dataset.
+
+    Keeps only rows usable for affinity regression: a heavy chain, an antigen sequence,
+    and a physically sane measured KD. Predicted KDs are dropped by default.
+
+    Args:
+        path: Path to ``ANDD_dataset.xlsx``.
+        sheet: Worksheet name.
+        kd_lo, kd_hi: Sane KD bounds in molar (default 1 pM .. 1 mM).
+        drop_predicted: Drop rows whose ``Affinity_Method`` is "Predict".
+        min_heavy, min_antigen: Minimum sequence lengths to keep.
+
+    Returns:
+        Columns: ``heavy, light, target, affinity (= -log10 KD[M]), kd_nm, source,
+        antibody, antigen, dataset`` — schema-compatible with :func:`load_curated`.
+    """
+    import numpy as np
+    import pandas as pd
+
+    pdf = pd.read_excel(path, sheet_name=sheet)
+    H, L, AG, KD, M = (
+        "Ab/Nano H_Chain AA", "Ab/Nano L_Chain AA", "Ag_Seq",
+        "Affinity_Kd(M)", "Affinity_Method",
+    )
+    heavy = pdf[H].map(_clean_seq)
+    light = pdf[L].map(_clean_seq)
+    antigen = pdf[AG].map(_clean_seq)
+    kd_m = pd.to_numeric(pdf[KD], errors="coerce")
+    method = pdf[M].astype(str).str.strip()
+
+    mask = (
+        heavy.fillna("").str.len().ge(min_heavy)
+        & antigen.fillna("").str.len().ge(min_antigen)
+        & kd_m.between(kd_lo, kd_hi)
+    )
+    if drop_predicted:
+        mask &= ~method.str.lower().str.startswith("predict")
+    mask = mask.fillna(False)
+
+    out = pd.DataFrame({
+        "heavy": heavy[mask],
+        "light": light[mask],
+        "target": antigen[mask],
+        "affinity": -np.log10(kd_m[mask].astype(float)),          # pKd
+        "kd_nm": kd_m[mask].astype(float) * 1e9,
+        "source": "ANDD:" + pdf.loc[mask, "Source"].astype(str),
+        "antibody": pdf.loc[mask, "Ab_or_Nano"].astype(str),
+        "antigen": pdf.loc[mask, "Ag_Name"].astype(str).replace("", "unknown"),
+        "dataset": "ANDD",
+    })
+    return pl.from_pandas(out)
+
+
 def normalize_affinity(
     df: pl.DataFrame,
     by: tuple[str, ...] = ("source", "antigen"),
@@ -118,6 +188,8 @@ def normalize_affinity(
     ``affinity`` column within each ``by`` group so a single regression sees a consistent
     target. Use this when pooling sources/antigens; skip it if you train on one group.
 
+    Singleton / zero-variance groups are left centered at 0 (z-score) to avoid NaNs.
+
     Args:
         df: Output of :func:`load_curated` (must contain an ``affinity`` column).
         by: Grouping columns defining a comparable assay/antigen unit.
@@ -129,17 +201,30 @@ def normalize_affinity(
     """
     by = list(by)
     if method == "zscore":
+        std = pl.col("affinity").std().over(by)
         return df.with_columns(
-            (
-                (pl.col("affinity") - pl.col("affinity").mean().over(by))
-                / pl.col("affinity").std().over(by)
-            ).alias(out_col)
+            pl.when(std > 0)
+            .then((pl.col("affinity") - pl.col("affinity").mean().over(by)) / std)
+            .otherwise(0.0)
+            .alias(out_col)
         )
     if method == "rank":
+        n = pl.len().over(by)
         return df.with_columns(
-            ((pl.col("affinity").rank("average").over(by) - 1) / (pl.len().over(by) - 1)).alias(out_col)
+            pl.when(n > 1)
+            .then((pl.col("affinity").rank("average").over(by) - 1) / (n - 1))
+            .otherwise(0.5)
+            .alias(out_col)
         )
     raise ValueError(f"Unknown method '{method}'. Use 'zscore' or 'rank'.")
+
+
+def load_unified(path: Path) -> pl.DataFrame:
+    """Load the prebuilt unified affinity dataset (output of build_unified_affinity.py).
+
+    Columns: ``heavy, light, target, affinity, affinity_norm, source, antigen, norm_group, dataset``.
+    """
+    return pl.read_csv(path, infer_schema_length=5000)
 
 
 def load_all(data_dir: Path) -> pl.DataFrame:

@@ -1,59 +1,80 @@
 # Data
 
-The DMS datasets are **not committed to git** (~162 MB of CSVs, PDBs, and raw
-flow-cytometry files). They live in S3 and on the server, and the code reads
-them from a local path. This file documents where to get them.
+Datasets are **not committed to git** (CSVs/PDBs/XLSX are too large). They live in S3 and
+the code reads them from a local path. This file documents what we have and how to get it.
 
-## Source of truth — S3 (hackathon account)
+## Source of truth — S3 (hackathon account `127696279288`, region `us-west-2`)
 
 ```
-s3://scrippsresearch-mshafiei-hackathon/DMS_Data/
-s3://scrippsresearch-mshafiei-hackathon/AB-Bind-Database/
+s3://scrippsresearch-mshafiei-hackathon/
+├── curated_data/
+│   ├── unified_affinity.csv     ← USE THIS: merged, normalized, regression-ready
+│   ├── filtered_data.csv        DMS binding data (Phillips/Dailey/MAGMA-seq)
+│   └── ANDD_dataset.xlsx        Terrence's unified Ab/Nb–antigen affinity collection
+├── DMS_Data/                    raw deep-mutational-scanning sources
+└── embeddings/                  cached model embeddings (one subdir per model)
 ```
 
-Region: `us-west-2`. Read access (`s3:GetObject`, `s3:ListBucket`) is granted
-to every member of the Scripps Hackathon AWS account (`127696279288`), so any
-teammate can pull it with their own SSO profile — no shared credentials.
-
-### Download to the default local path
+Read access is granted to everyone in the hackathon account, so teammates pull with their
+own SSO profile — no shared credentials.
 
 ```bash
-# From a laptop / dev box (replace <profile> with your SSO profile name)
-aws s3 sync s3://scrippsresearch-mshafiei-hackathon/DMS_Data ./DMS_Data \
-  --profile <profile> --region us-west-2
-
-# From an EC2 instance with the hackathon-ec2-profile (no --profile needed)
-aws s3 sync s3://scrippsresearch-mshafiei-hackathon/DMS_Data /data/DMS_Data \
-  --region us-west-2
+aws s3 cp s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity.csv \
+  curated_data/ --profile <profile> --region us-west-2
 ```
 
-Point the pipeline at wherever you put it:
+## The unified dataset (`unified_affinity.csv`) — what to train on
 
+Built by `scripts/build_unified_affinity.py` from `filtered_data.csv` + the usable subset of
+ANDD. **40,937 rows**, **1,041 antigens**. Each row has an antibody (heavy + light), an
+antigen sequence, and an affinity label — everything needed to inference the three models and
+run an affinity regression.
+
+| Column | Meaning |
+|---|---|
+| `heavy`, `light` | antibody VH / VL (light empty for nanobodies / heavy-only records) |
+| `target` | antigen protein sequence |
+| `affinity` | **pKd = −log10(KD in M)** (higher = stronger binding) |
+| `affinity_norm` | pKd **z-scored within `norm_group`** — the regression target |
+| `source`, `antigen` | provenance + antigen name |
+| `norm_group` | normalization unit (per source×antigen for DMS; one block for ANDD) |
+| `dataset` | `phillips2021` / `dailey` / `magma_seq` / `ANDD` |
+
+### Why `affinity_norm`?
+The rows come from different assays/protocols (Tite-seq, KD tables, MAGMA-seq yeast display,
+and ANDD's literature/SPR Kd) with different scales and dynamic-range ceilings, so raw pKd is
+**not comparable across rows**. `affinity_norm` z-scores within each protocol/antigen group so
+a single regression sees a consistent target. Use `affinity_norm` as the label; `affinity`
+(raw pKd) is kept for reference.
+
+### What was dropped (not usable for affinity regression)
+- Phillips CR9114 **H3-HA** — ~88% of values pinned at the assay ceiling (degenerate).
+- ANDD rows without a heavy chain, antigen sequence, or a sane measured KD (1 pM–1 mM); predicted KDs excluded.
+- From Terrence's bucket: PLAbDab (sequences only, no labels), SARS2 escape (escape ≠ KD),
+  IEDB epitopes (categorical), AB-Bind (ΔΔG, a different quantity).
+
+## Rebuild it
+```bash
+python scripts/build_unified_affinity.py \
+  --curated curated_data/filtered_data.csv \
+  --andd    curated_data/ANDD_dataset.xlsx \
+  --out     curated_data/unified_affinity.csv
+```
+
+## Programmatic load
 ```python
 from pathlib import Path
-from quantab.data import load_all, summarize
-
-DATA_DIR = Path("/home/jovyan/work/Hackaton/DMS_Data")  # or /data/DMS_Data on EC2
-df = load_all(DATA_DIR)
-summarize(df)
+from quantab.data import load_unified
+df = load_unified(Path("curated_data/unified_affinity.csv"))
 ```
 
-## Datasets
+## Source provenance
+| Dataset | Origin |
+|---|---|
+| Phillips 2021 | CR9114/CR6261 anti-influenza DMS (Tite-seq), *eLife* |
+| Dailey | CR9114 single-mutant KD tables |
+| MAGMA-seq | 4A8 / CC12.1 vs SARS-CoV-2 RBD (yeast display) |
+| ANDD | Terrence's merge of SAbDab, sdAb-DB, abYbank, PDB, PLAbDab-nano, INDI, … (literature/SPR Kd) |
 
-| Directory | Dataset | Measurement | N variants | Origin |
-|---|---|---|---|---|
-| `02_phillips_cr9114_cr6261/` | Phillips et al. 2021 CR9114 anti-influenza DMS | `*_neg_log_kd` | ~67,000 | Phillips et al., *eLife* 2021 |
-| `05_engelhart_aayl/` | Engelhart et al. AAYL variants | `binding_score` | ~varies | Engelhart et al. |
-| `06_shanehsazzadeh_trastuzumab/` | Shanehsazzadeh trastuzumab zero-shot binders | `-log(KD (M))` | 422 | Shanehsazzadeh et al. |
-| `01_dailey_cr9114/` | Dailey CR9114 single-point mutants | `minus_log_Kd` | ~varies | Dailey et al. |
-| `03_magma_seq/` | MAGMA-seq data | mixed | — | — |
-| `04_adams_4420/` | Adams et al. titeseq (raw FCS + replicates) | titeseq | — | Adams et al. |
-| `pdbs/` | Reference antibody-antigen structures | — | — | RCSB PDB |
-
-`AB-Bind-Database/` (ΔΔG mutation data + homology-model PDBs) is an additional
-antibody-binding resource, mirrored from
-[sarahsirin/AB-Bind-Database](https://github.com/sarahsirin/AB-Bind-Database).
-
-> All datasets are derived from published studies and retain their original
-> licenses. This bucket is a convenience mirror for the hackathon, not a
-> re-publication.
+All datasets derive from published studies and retain their original licenses. The S3 bucket
+is a convenience mirror for the hackathon, not a re-publication.

@@ -33,27 +33,32 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from quantab.data import load_all, load_curated, summarize
+from quantab.data import load_all, load_curated, load_unified, summarize
 from quantab.embeddings import REGISTRY, ModelConfig, extract_embeddings, fit_pca, load_model
 
 PCA_DIMS = [6, 10]
 BATCH_SIZE = 64
 
 
-def get_sequences(df: pl.DataFrame, cfg: ModelConfig):
-    """Build the model's expected input from heavy (+ light) chains.
+def get_sequences(df: pl.DataFrame, cfg: ModelConfig, embed: str = "antibody"):
+    """Build the model's expected input sequences.
 
-    - Paired models (e.g. balm_paired): list of ``(heavy, light)`` tuples — the tokenizer
-      handles native pairing. Concatenation is NOT used.
-    - Single-chain models: heavy + light concatenated into one string when light exists.
+    embed="antibody": antibody chains.
+      - Paired models (balm_paired): list of ``(heavy, light)`` tuples (native pairing).
+      - Single-chain models: heavy + light concatenated into one string when light exists.
+    embed="target": the antigen sequence (single string per row) — for embedding the
+      target/antigen modality with a general protein model (ESM-2).
     """
+    if embed == "target":
+        seqs = df["target"].to_list()
+        return [(s, "") for s in seqs] if cfg.paired else seqs
+
     heavy = df["heavy"].to_list()
     light = df["light"].to_list() if "light" in df.columns else [None] * len(heavy)
-
     if cfg.paired:
-        return [(h, l if l is not None else "") for h, l in zip(heavy, light)]
+        return [(h, (l or "")) for h, l in zip(heavy, light)]
     if "light" in df.columns:
-        return [h + l if l is not None else h for h, l in zip(heavy, light)]
+        return [h + l if l else h for h, l in zip(heavy, light)]
     return heavy
 
 
@@ -62,12 +67,18 @@ def run(args: argparse.Namespace) -> None:
     models = list(REGISTRY.keys()) if args.model == "all" else [args.model]
 
     print(f"\n{'='*60}")
-    if args.data_file:
+    if args.unified:
+        # Prebuilt unified affinity dataset (heavy/light/target/affinity/affinity_norm)
+        print(f"Loading unified dataset from {args.unified}  (embed={args.embed})")
+        df_all = load_unified(Path(args.unified))
+        summarize(df_all)
+        datasets: dict[str, pl.DataFrame] = {"unified": df_all}
+    elif args.data_file:
         # Curated single-file dataset (filtered_data.csv from S3)
         print(f"Loading curated dataset from {args.data_file}")
         df_all = load_curated(Path(args.data_file))
         summarize(df_all)
-        datasets: dict[str, pl.DataFrame] = {"curated": df_all}
+        datasets = {"curated": df_all}
     else:
         data_dir = Path(args.data_dir)
         print(f"Loading datasets from {data_dir}")
@@ -93,35 +104,40 @@ def run(args: argparse.Namespace) -> None:
         model_dir.mkdir(parents=True, exist_ok=True)
 
         for ds_name, df in datasets.items():
-            raw_path = model_dir / f"{ds_name}_raw.npy"
+            # antigen embeddings get a distinct prefix so they sit beside antibody ones
+            tag = f"{ds_name}_antigen" if args.embed == "target" else ds_name
+            raw_path = model_dir / f"{tag}_raw.npy"
 
             # --- Raw embeddings ---
             if raw_path.exists() and not args.overwrite:
-                print(f"  [{ds_name}] raw embeddings exist, loading from cache.")
+                print(f"  [{tag}] raw embeddings exist, loading from cache.")
                 raw = np.load(raw_path)
             else:
-                print(f"  [{ds_name}] extracting embeddings for {len(df)} sequences...")
-                seqs = get_sequences(df, cfg)
+                print(f"  [{tag}] extracting embeddings for {len(df)} sequences (embed={args.embed})...")
+                seqs = get_sequences(df, cfg, embed=args.embed)
                 raw = extract_embeddings(seqs, tok, model, cfg, batch_size=BATCH_SIZE)
                 np.save(raw_path, raw)
-                print(f"  [{ds_name}] saved raw embeddings → {raw_path}  shape={raw.shape}")
+                print(f"  [{tag}] saved raw embeddings → {raw_path}  shape={raw.shape}")
 
             # --- PCA reductions ---
             for n in args.n_components:
-                pca_path = model_dir / f"{ds_name}_{n}d.npy"
+                pca_path = model_dir / f"{tag}_{n}d.npy"
                 if pca_path.exists() and not args.overwrite:
-                    print(f"  [{ds_name}] {n}d PCA exists, skipping.")
+                    print(f"  [{tag}] {n}d PCA exists, skipping.")
                     continue
                 pca, X = fit_pca(raw, n_components=n)
                 np.save(pca_path, X)
                 var = pca.explained_variance_ratio_.sum()
-                print(f"  [{ds_name}] PCA {n}d → {pca_path}  explained_var={var:.3f}")
+                print(f"  [{tag}] PCA {n}d → {pca_path}  explained_var={var:.3f}")
 
-            # --- Save labels alongside embeddings (once per dataset) ---
-            labels_path = model_dir / f"{ds_name}_labels.npy"
-            if not labels_path.exists() or args.overwrite:
-                y = df["affinity"].to_numpy().astype("float32")
-                np.save(labels_path, y)
+            # --- Save labels alongside embeddings (raw pKd + normalized) ---
+            if args.embed != "target":
+                labels_path = model_dir / f"{ds_name}_labels.npy"
+                if (not labels_path.exists() or args.overwrite) and "affinity" in df.columns:
+                    np.save(labels_path, df["affinity"].to_numpy().astype("float32"))
+                norm_path = model_dir / f"{ds_name}_labels_norm.npy"
+                if (not norm_path.exists() or args.overwrite) and "affinity_norm" in df.columns:
+                    np.save(norm_path, df["affinity_norm"].to_numpy().astype("float32"))
 
         # Save model metadata
         meta_path = model_dir / "metadata.json"
@@ -156,6 +172,18 @@ def parse_args() -> argparse.Namespace:
         "Takes precedence over --data-dir.",
     )
     parser.add_argument(
+        "--unified",
+        default=None,
+        help="Path to the prebuilt unified affinity dataset (unified_affinity.csv). "
+        "Takes precedence over --data-file / --data-dir.",
+    )
+    parser.add_argument(
+        "--embed",
+        default="antibody",
+        choices=["antibody", "target"],
+        help="What to embed: 'antibody' (heavy[+light]) or 'target' (antigen sequence).",
+    )
+    parser.add_argument(
         "--output-dir",
         default="embeddings",
         help="Directory to save embeddings (default: embeddings/).",
@@ -179,8 +207,8 @@ def parse_args() -> argparse.Namespace:
         help="Recompute and overwrite existing embedding files.",
     )
     args = parser.parse_args()
-    if not args.data_file and not args.data_dir:
-        parser.error("provide --data-file (curated CSV) or --data-dir (DMS_Data directory)")
+    if not args.unified and not args.data_file and not args.data_dir:
+        parser.error("provide --unified, --data-file, or --data-dir")
     return args
 
 
