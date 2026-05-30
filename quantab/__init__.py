@@ -1,4 +1,4 @@
-from quantab.data import load_all, load_curated, normalize_affinity, load_phillips, load_engelhart, load_trastuzumab, summarize
+from quantab.data import load_all, load_curated, load_andd, load_unified, normalize_affinity, load_phillips, load_engelhart, load_trastuzumab, summarize
 from quantab.embeddings import load_model, embed_and_reduce, extract_embeddings, fit_pca, REGISTRY
 from quantab.balm_head import load_balm_head, tokenize_pairs, predict as balm_predict
 from quantab.classical import MODELS as CLASSICAL_MODELS
@@ -7,7 +7,7 @@ from quantab.evaluation import learning_curve, evaluate_classical, evaluate_quan
 from quantab.visualization import plot_learning_curves, plot_affinity_scatter
 
 __all__ = [
-    "load_all", "load_curated", "normalize_affinity", "load_phillips", "load_engelhart", "load_trastuzumab", "summarize",
+    "load_all", "load_curated", "load_andd", "load_unified", "normalize_affinity", "load_phillips", "load_engelhart", "load_trastuzumab", "summarize",
     "load_model", "embed_and_reduce", "extract_embeddings", "fit_pca", "REGISTRY",
     "load_balm_head", "tokenize_pairs", "balm_predict",
     "CLASSICAL_MODELS", "build_minimal_kernel", "build_expressive_kernel", "KERNELS",
