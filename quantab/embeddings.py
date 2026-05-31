@@ -1,4 +1,4 @@
-"""Antibody language model embedding extraction and PCA dimensionality reduction.
+"""Antibody language model embedding extraction and dimensionality reduction.
 
 Supported models
 ----------------
@@ -7,6 +7,14 @@ esm2_35M     : facebook/esm2_t12_35M_UR50D   — general protein ESM-2,  480-dim
 esm2_150M    : facebook/esm2_t30_150M_UR50D  — general protein ESM-2,  640-dim
 esm2_650M    : facebook/esm2_t33_650M_UR50D  — general protein ESM-2, 1280-dim  ← recommended
 balm_paired  : brineylab/BALM-paired          — paired antibody RoBERTa, 1024-dim (Burbach & Briney 2024)
+
+Dimensionality reduction
+------------------------
+fit_pca   : Unsupervised — high-variance directions, no affinity signal.
+            Use as negative control / baseline only.
+fit_plsr  : Supervised — directions maximally covariant with pKd labels.
+            Primary DR method for quantum and classical kernel experiments.
+            Must be fit on training data only; always pass y_train.
 """
 
 from __future__ import annotations
@@ -17,6 +25,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+from sklearn.cross_decomposition import PLSRegression
 from sklearn.decomposition import PCA
 from tqdm.auto import tqdm
 from transformers import AutoModel, AutoTokenizer
@@ -168,6 +177,37 @@ def fit_pca(embeddings: np.ndarray, n_components: int) -> tuple[PCA, np.ndarray]
     pca = PCA(n_components=n_components, random_state=42)
     reduced = pca.fit_transform(embeddings)
     return pca, reduced
+
+
+def fit_plsr(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    n_components: int,
+) -> PLSRegression:
+    """Fit Partial Least Squares Regression on training embeddings.
+
+    Finds the n_components directions in embedding space maximally covariant
+    with pKd labels — far more informative than PCA for affinity prediction.
+
+    Args:
+        X_train: Raw embeddings, shape (N_train, hidden_dim).
+        y_train: Affinity labels (affinity_norm), shape (N_train,).
+        n_components: Number of latent components (= qubits per register).
+
+    Returns:
+        Fitted PLSRegression. Use plsr.transform(X) to project new data.
+    """
+    # Guard: PLSR requires n_components <= min(n_samples, n_features)
+    n_comp = min(n_components, X_train.shape[0] - 1, X_train.shape[1])
+    if n_comp < n_components:
+        import warnings
+        warnings.warn(
+            f"fit_plsr: clamped n_components {n_components} → {n_comp} "
+            f"(N_train={X_train.shape[0]}, n_features={X_train.shape[1]})"
+        )
+    plsr = PLSRegression(n_components=n_comp)
+    plsr.fit(X_train, y_train)
+    return plsr
 
 
 def embed_and_reduce(

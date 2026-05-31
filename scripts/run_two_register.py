@@ -2,49 +2,54 @@
 Two-register quantum kernel experiments.
 
 Loads antibody embeddings (igbert or balm_paired) and antigen embeddings
-(esm2_650M) separately, concatenates them, and runs:
+(esm2_650M) separately and runs a full comparison:
   - two_reg_minimal / two_reg_expressive  (core QuantAb claim)
   - quantum_minimal / quantum_expressive  (single-register ablation)
   - vqc                                   (variational regressor)
   - mlp / rbf_svm / random_forest         (classical baselines)
 
-All methods receive the same concatenated [X_ab | X_tgt] features so the
-only variable is the circuit / model architecture.
+Dimensionality reduction (--dr):
+  plsr  [default] — supervised, fits on training labels per fold.
+                    Primary method; captures affinity-relevant structure.
+  pca             — unsupervised, fits on training features per fold.
+                    Negative control; blurs affinity signal.
+  none            — load pre-reduced files (legacy / fast sanity check).
+
+When dr != 'none', raw embeddings (unified_raw.npy) are loaded and DR is
+applied inside each CV fold — on training data only, never leaking test labels.
 
 Usage
 -----
+  # Primary run (PLSR, both resolutions)
   python scripts/run_two_register.py
 
-  # Specific settings
-  python scripts/run_two_register.py \\
-      --ab-model igbert --tgt-model esm2_650M \\
-      --n-components 6 --train-sizes 50 100 200 \\
-      --no-vqc --overwrite
+  # PCA negative control
+  python scripts/run_two_register.py --dr pca --overwrite
+
+  # Legacy pre-reduced files (fast sanity check, no per-fold DR)
+  python scripts/run_two_register.py --dr none --n-components 6
 
 Output
 ------
-  results/two_reg_<ab_model>_<tgt_model>_<n>d.json
+  results/two_reg_<ab_model>_<tgt_model>_<dr>_<n>d.json
 """
 
 import argparse
-import copy
 import json
 from pathlib import Path
 
 import numpy as np
-from sklearn.svm import SVR
 
 from quantab.classical import MODELS as CLASSICAL_MODELS
-from quantab.evaluation import learning_curve, spearman
+from quantab.evaluation import learning_curve
 from quantab.quantum_kernels import (
-    build_minimal_kernel,
-    build_expressive_kernel,
-    build_two_register_minimal_kernel,
-    build_two_register_expressive_kernel,
     VQCRegressor,
+    build_expressive_kernel,
+    build_minimal_kernel,
+    build_two_register_expressive_kernel,
+    build_two_register_minimal_kernel,
 )
 
-# Quantum is O(N²) — keep smaller; classical can go full dataset
 QUANTUM_TRAIN_SIZES = [50, 100, 200, 500, 1000, 2000]
 CLASSICAL_TRAIN_SIZES = [50, 100, 200, 500, 1000, 2000, 5000]
 
@@ -53,18 +58,32 @@ TEST_SIZE = 500
 RANDOM_STATE = 42
 
 
-def load_embeddings(emb_dir: Path, model_key: str, n: int) -> np.ndarray:
-    """Load the pre-reduced embedding array for a given model and dimension."""
-    # Try unified first, then fall back to first found file
+# ---------------------------------------------------------------------------
+# Embedding loading helpers
+# ---------------------------------------------------------------------------
+
+def load_raw(emb_dir: Path, model_key: str) -> np.ndarray:
+    """Load raw (pre-DR) embeddings — shape (N, hidden_dim)."""
+    p = emb_dir / model_key / "unified_raw.npy"
+    if not p.exists():
+        raise FileNotFoundError(
+            f"Raw embeddings not found: {p}\n"
+            "Run scripts/extract_embeddings.py first, or sync from S3:\n"
+            "  aws s3 sync s3://scrippsresearch-mshafiei-hackathon/embeddings/ embeddings/ "
+            "--profile bnemoz-scripps --region us-west-2"
+        )
+    return np.load(p)
+
+
+def load_reduced(emb_dir: Path, model_key: str, n: int) -> np.ndarray:
+    """Load pre-reduced embeddings — shape (N, n). Used only when --dr none."""
     candidate = emb_dir / model_key / f"unified_{n}d.npy"
     if candidate.exists():
         return np.load(candidate)
-    # Try any *_{n}d.npy in the directory
     hits = sorted((emb_dir / model_key).glob(f"*_{n}d.npy"))
     if not hits:
         raise FileNotFoundError(
-            f"No {n}d embedding found for '{model_key}' in {emb_dir / model_key}. "
-            "Run extract_embeddings.py first."
+            f"No {n}d embedding found for '{model_key}' in {emb_dir / model_key}."
         )
     if len(hits) > 1:
         print(f"  [warn] multiple {n}d files for {model_key}, using {hits[0].name}")
@@ -72,17 +91,22 @@ def load_embeddings(emb_dir: Path, model_key: str, n: int) -> np.ndarray:
 
 
 def load_labels(emb_dir: Path, model_key: str) -> np.ndarray:
-    """Load normalised affinity labels (z-scored pKd)."""
+    """Load z-scored pKd labels (affinity_norm)."""
     for name in ("unified_labels_norm.npy", "unified_labels.npy"):
         p = emb_dir / model_key / name
         if p.exists():
             return np.load(p)
-    # Fall back to any *labels*.npy
     hits = sorted((emb_dir / model_key).glob("*labels*.npy"))
     if not hits:
-        raise FileNotFoundError(f"No labels file found for '{model_key}' in {emb_dir / model_key}")
+        raise FileNotFoundError(
+            f"No labels file found for '{model_key}' in {emb_dir / model_key}"
+        )
     return np.load(hits[0])
 
+
+# ---------------------------------------------------------------------------
+# Experiment runner
+# ---------------------------------------------------------------------------
 
 def run(args: argparse.Namespace) -> None:
     emb_dir = Path(args.embeddings_dir)
@@ -90,92 +114,100 @@ def run(args: argparse.Namespace) -> None:
     results_dir.mkdir(parents=True, exist_ok=True)
 
     for n in args.n_components:
-        tag = f"two_reg_{args.ab_model}_{args.tgt_model}_{n}d"
+        tag = f"two_reg_{args.ab_model}_{args.tgt_model}_{args.dr}_{n}d"
         out_path = results_dir / f"{tag}.json"
 
         if out_path.exists() and not args.overwrite:
-            print(f"[{tag}] results exist — skipping. Use --overwrite to rerun.")
+            print(f"[{tag}] exists — skipping (--overwrite to rerun).")
             continue
 
         print(f"\n[{tag}]  loading embeddings …")
         try:
-            X_ab = load_embeddings(emb_dir, args.ab_model, n)
-            X_tgt = load_embeddings(emb_dir, args.tgt_model, n)
             y = load_labels(emb_dir, args.ab_model)
+            if args.dr == "none":
+                # Pre-reduced: load fixed-dim arrays, concatenate for all methods
+                X_ab = load_reduced(emb_dir, args.ab_model, n)
+                X_tgt = load_reduced(emb_dir, args.tgt_model, n)
+                X_input = np.hstack([X_ab, X_tgt])
+                print(f"  N={len(y)}  pre-reduced: X_ab={X_ab.shape} X_tgt={X_tgt.shape}")
+            else:
+                # Raw embeddings: DR applied per fold inside learning_curve
+                X_ab = load_raw(emb_dir, args.ab_model)
+                X_tgt = load_raw(emb_dir, args.tgt_model)
+                X_input = [X_ab, X_tgt]   # list triggers per-modality DR
+                print(
+                    f"  N={len(y)}  raw: X_ab={X_ab.shape} X_tgt={X_tgt.shape}"
+                    f"  → {args.dr.upper()} {n}d per modality per fold"
+                )
         except FileNotFoundError as e:
             print(f"  SKIP: {e}")
             continue
 
-        assert len(X_ab) == len(X_tgt) == len(y), (
-            f"Length mismatch: X_ab={len(X_ab)}, X_tgt={len(X_tgt)}, y={len(y)}"
+        # Shared kwargs passed to every learning_curve call
+        lc_kwargs = dict(
+            y=y,
+            n_repeats=N_REPEATS,
+            test_size=TEST_SIZE,
+            random_state=RANDOM_STATE,
+            dr=args.dr,
+            n_components=n,
         )
-        X_cat = np.hstack([X_ab, X_tgt])  # shape (N, 2*n)
-        print(f"  N={len(X_cat)}  X_ab={X_ab.shape}  X_tgt={X_tgt.shape}  X_cat={X_cat.shape}")
-
-        results: dict[str, dict] = {}
         q_sizes = [s for s in args.train_sizes if s <= args.quantum_max_train]
         c_sizes = args.train_sizes
 
-        # --- Classical baselines ---
+        results: dict[str, dict] = {}
+
+        # --- Classical baselines (antibody + antigen, joint) ---
         for name, factory in CLASSICAL_MODELS.items():
             print(f"  {name} …")
             results[name] = learning_curve(
-                factory(),
-                X_cat, y,
-                train_sizes=c_sizes,
-                is_quantum=False,
-                n_repeats=N_REPEATS,
-                test_size=TEST_SIZE,
-                random_state=RANDOM_STATE,
+                factory(), X_input, train_sizes=c_sizes, is_quantum=False, **lc_kwargs
             )
 
-        # --- Classical on antibody-only (ablation: no antigen info) ---
+        # --- Classical antibody-only (no antigen — measures ab-only signal) ---
+        X_ab_input = X_ab if args.dr != "none" else X_ab  # raw or pre-reduced either way
         for name, factory in CLASSICAL_MODELS.items():
             key = f"{name}_ab_only"
             print(f"  {key} …")
             results[key] = learning_curve(
                 factory(),
-                X_ab, y,
+                X_ab_input if args.dr == "none" else [X_ab],
                 train_sizes=c_sizes,
                 is_quantum=False,
-                n_repeats=N_REPEATS,
-                test_size=TEST_SIZE,
-                random_state=RANDOM_STATE,
+                **lc_kwargs,
             )
 
         if not args.no_quantum:
-            # --- Single-register quantum kernels (ablation) ---
+            # For quantum methods the features must be concrete arrays (DR already
+            # applied per fold by learning_curve) — the kernel receives X_tr/X_te
+            # after reduction, so no extra handling needed here.
+
+            # --- Single-register quantum (ablation: same qubit count, no structure) ---
             for name, builder in [
                 ("quantum_minimal", build_minimal_kernel),
                 ("quantum_expressive", build_expressive_kernel),
             ]:
                 print(f"  {name} ({2*n} qubits, concatenated input) …")
-                kernel_fn = builder(n_qubits=2 * n)
                 results[name] = learning_curve(
-                    kernel_fn,
-                    X_cat, y,
+                    builder(n_qubits=2 * n),
+                    X_input,
                     train_sizes=q_sizes,
                     is_quantum=True,
-                    n_repeats=N_REPEATS,
-                    test_size=TEST_SIZE,
-                    random_state=RANDOM_STATE,
+                    **lc_kwargs,
                 )
 
-            # --- Two-register quantum kernels (core contribution) ---
+            # --- Two-register quantum (core contribution) ---
             for name, builder in [
                 ("two_reg_minimal", build_two_register_minimal_kernel),
                 ("two_reg_expressive", build_two_register_expressive_kernel),
             ]:
-                print(f"  {name} ({n}+{n} qubits, two-register) …")
-                kernel_fn = builder(n_qubits_ab=n, n_qubits_tgt=n)
+                print(f"  {name} ({n}+{n} qubits) …")
                 results[name] = learning_curve(
-                    kernel_fn,
-                    X_cat, y,
+                    builder(n_qubits_ab=n, n_qubits_tgt=n),
+                    X_input,
                     train_sizes=q_sizes,
                     is_quantum=True,
-                    n_repeats=N_REPEATS,
-                    test_size=TEST_SIZE,
-                    random_state=RANDOM_STATE,
+                    **lc_kwargs,
                 )
 
         # --- VQC regressor ---
@@ -190,12 +222,10 @@ def run(args: argparse.Namespace) -> None:
                     lr=0.05,
                     random_state=RANDOM_STATE,
                 ),
-                X_cat, y,
+                X_input,
                 train_sizes=vqc_sizes,
                 is_quantum=False,
-                n_repeats=N_REPEATS,
-                test_size=TEST_SIZE,
-                random_state=RANDOM_STATE,
+                **lc_kwargs,
             )
 
         with open(out_path, "w") as f:
@@ -205,6 +235,10 @@ def run(args: argparse.Namespace) -> None:
     print(f"\nDone. Results in {results_dir}/")
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Two-register quantum kernel experiments.")
     p.add_argument("--embeddings-dir", default="embeddings")
@@ -213,20 +247,31 @@ def parse_args() -> argparse.Namespace:
         "--ab-model",
         default="igbert",
         choices=["igbert", "balm_paired"],
-        help="Antibody embedding model.",
+        help="Antibody embedding model (default: igbert).",
     )
     p.add_argument(
         "--tgt-model",
         default="esm2_650M",
         choices=["esm2_35M", "esm2_150M", "esm2_650M"],
-        help="Antigen embedding model.",
+        help="Antigen embedding model (default: esm2_650M).",
+    )
+    p.add_argument(
+        "--dr",
+        default="plsr",
+        choices=["plsr", "pca", "none"],
+        help=(
+            "Dimensionality reduction applied per fold on training data. "
+            "'plsr' (default): supervised, primary method. "
+            "'pca': unsupervised, negative control. "
+            "'none': load pre-reduced files (fast sanity check)."
+        ),
     )
     p.add_argument(
         "--n-components",
         nargs="+",
         type=int,
         default=[6, 10],
-        help="PCA dimensions per modality (default: 6 10).",
+        help="DR components per modality / qubits per register (default: 6 10).",
     )
     p.add_argument(
         "--train-sizes",
@@ -239,19 +284,19 @@ def parse_args() -> argparse.Namespace:
         "--quantum-max-train",
         type=int,
         default=2000,
-        help="Cap quantum kernel training sizes (O(N²) cost).",
+        help="Cap quantum kernel training sizes (O(N²) cost, default 2000).",
     )
     p.add_argument(
         "--vqc-max-train",
         type=int,
         default=200,
-        help="Cap VQC training sizes (slow per-sample forward pass).",
+        help="Cap VQC training sizes (slow per-sample forward pass, default 200).",
     )
     p.add_argument("--vqc-layers", type=int, default=3)
     p.add_argument("--vqc-epochs", type=int, default=100)
-    p.add_argument("--no-quantum", action="store_true", help="Skip quantum kernels.")
+    p.add_argument("--no-quantum", action="store_true", help="Skip all quantum kernels.")
     p.add_argument("--no-vqc", action="store_true", help="Skip VQC regressor.")
-    p.add_argument("--overwrite", action="store_true")
+    p.add_argument("--overwrite", action="store_true", help="Rerun even if output exists.")
     return p.parse_args()
 
 
