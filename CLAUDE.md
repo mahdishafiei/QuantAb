@@ -68,11 +68,11 @@ What is implemented today:
 
   | Key | Model | Type | Dim | Input format | Pooling |
   |---|---|---|---|---|---|
-  | `igbert` | `Exscientia/IgBert` | Antibody-specific | 1024 | Space-separated AAs | [CLS] |
+  | `igbert` | `Exscientia/IgBert` | Antibody-specific | 1024 | Space-separated AAs | Mean |
   | `esm2_35M` | `facebook/esm2_t12_35M_UR50D` | General protein | 480 | Raw sequence | Mean |
   | `esm2_150M` | `facebook/esm2_t30_150M_UR50D` | General protein | 640 | Raw sequence | Mean |
   | `esm2_650M` | `facebook/esm2_t33_650M_UR50D` | General protein | 1280 | Raw sequence | Mean |
-  | `balm_paired` | `brineylab/BALM-paired` | Natively-paired antibody | 1024 | (heavy, light) pair | [CLS] |
+  | `balm_paired` | `brineylab/BALM-paired` | Natively-paired antibody | 1024 | (heavy, light) pair | Mean |
 
   Note: `balm_paired` takes heavy and light as two separate sequences (RoBERTa two-sequence input), not concatenated. (Caveat: `scripts/extract_embeddings.py` currently concatenates for all models — fix before running BALM through the script; the library `embed_and_reduce` path already handles pairing correctly.)
 

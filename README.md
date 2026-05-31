@@ -39,9 +39,9 @@ A secondary question this project uniquely addresses:
 Antibody sequences
       ↓
 AbLM embeddings
-  ├── IgBERT        (antibody-specific,  1024-dim, [CLS] pooling)
-  ├── ESM-2 650M    (general protein,   1280-dim,  mean pooling)
-  └── BALM-paired   (natively-paired,   1024-dim, [CLS] pooling)
+  ├── IgBERT        (antibody-specific,  1024-dim, mean pooling)
+  ├── ESM-2 650M    (general protein,   1280-dim, mean pooling)
+  └── BALM-paired   (natively-paired,   1024-dim, mean pooling)
       ↓
 PCA reduction  →  6 or 10 dimensions  (= qubit count)
       ↓
