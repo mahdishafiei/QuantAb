@@ -164,6 +164,47 @@ is the stronger scientific story and naturally tests the small-data hypothesis.
 
 ---
 
+### 2026-05-31 — Unified dataset + embeddings ready (Terrence + Mahdi + Benjamin)
+
+**Everything needed for quantum kernel experiments is on S3 and downloaded locally.**
+
+**Terrence contributed:** `ANDD_dataset.xlsx` — merged Ab/Nb–antigen affinities from SAbDab,
+sdAb-DB, abYbank, PDB, PLAbDab-nano, INDI, and other literature/SPR sources. 3,310 usable rows
+after filtering (heavy chain + antigen sequence + sane measured KD 1pM–1mM, no predicted values).
+
+**Unified dataset** (`curated_data/unified_affinity.csv`): **40,937 rows, 1,041 antigens**.
+
+| Dataset | Rows | Note |
+|---------|------|------|
+| Phillips 2021 | 33,345 | H3-HA arm dropped (88% at ceiling) |
+| Dailey | 4,196 | CR9114 single-mutants |
+| ANDD | 3,310 | literature/SPR, diverse antigens |
+| MAGMA-seq | 86 | SARS-CoV-2 |
+
+Regression target: `affinity_norm` (pKd z-scored within `norm_group`). Raw `affinity` (pKd 3.0–12.0) kept for reference.
+
+**Embeddings computed and synced to `embeddings/` (local) and S3:**
+
+| Model | Role | Files | Shape |
+|-------|------|-------|-------|
+| IgBERT | Antibody | `unified_6d.npy`, `unified_10d.npy` | (40937, 6/10) |
+| BALM-paired | Antibody | `unified_6d.npy`, `unified_10d.npy` | (40937, 6/10) |
+| ESM2-650M | Antibody + **Antigen** | `unified_6d/10d.npy` + `unified_antigen_6d/10d.npy` | (40937, 6/10) |
+
+**Two-register quantum kernel is unblocked.** Register 1 (k_ab qubits): IgBERT or BALM-paired
+`unified_6d/10d.npy`. Register 2 (k_tgt qubits): ESM2-650M `unified_antigen_6d/10d.npy`.
+Labels: `unified_labels_norm.npy` (z-scored, use this as target).
+
+Teammate sync:
+```bash
+aws s3 sync s3://scrippsresearch-mshafiei-hackathon/embeddings/ embeddings/ \
+  --profile <your-profile> --region us-west-2 --exclude "*_raw.npy" --exclude "curated_*"
+aws s3 cp s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity.csv \
+  curated_data/ --profile <your-profile> --region us-west-2
+```
+
+---
+
 ### 2026-05-29 — Single-register pipeline + dataset mirror merged (Mahdi)
 
 - Implemented the full single-register baseline pipeline on the `mahdi_quant` branch: `quantab/data.py` (Phillips/Engelhart/trastuzumab loaders), `embeddings.py` (IgBERT + ESM-2 35M/150M/650M + BALM-paired registry with PCA), `quantum_kernels.py` (minimal + expressive single-register kernels), `classical.py`, `evaluation.py` (learning curves + Spearman), `visualization.py`, and CLI scripts `extract_embeddings.py` / `run_experiments.py` / `generate_figures.py`.
