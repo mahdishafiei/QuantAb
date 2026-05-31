@@ -107,6 +107,7 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 | Hackathon qubit counts | (6,6) and (10,10) per register | 12 and 20 total qubits. (8,8)=16 dropped (not a useful scaling point). 28 qubits (14+14) reserved for paper, GPU only. |
 | Antibody model | IgBERT (preferred) or BALM | Must accept **paired VH+VL** — never embed chains separately |
 | Target model | ESM2 | Standard protein LM; pooled sequence embedding |
+| Pooling strategy | Mean pooling over full sequence | CLS rejected (no guarantee it encodes binding-relevant features). Mean over full recombined VH+VL (post-VDJ — HCDR3 is included). V-gene alone is NOT enough (cuts off before HCDR3 junction). Diluted but present. Long-term fix: length-constrained model for full per-position embeddings. |
 | Embedding pipeline | Separate extraction → separate normalize → separate PCA → two-register quantum / concatenate classical | Modalities are heterogeneous; joint PCA without normalization is dominated by largest space |
 | DR method (hackathon) | PCA per modality | Unsupervised, no label leakage, interpretable |
 | DR method (paper) | PCA + PLSR + random projection | PLSR maximizes label covariance; random projection is null baseline |
