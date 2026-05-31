@@ -27,6 +27,9 @@ from quantab.data import load_curated, load_andd, normalize_affinity
 # Phillips CR9114 vs H3-HA is ~88% pinned at the assay ceiling (degenerate) — drop it.
 DROP_GROUPS = {("phillips2021", "H3-HA")}
 
+# ESM-2 usable context (1024). Antigens longer than this are truncated when embedded.
+ANTIGEN_MAX_LEN = 1024
+
 COLS = ["heavy", "light", "target", "affinity", "source", "antigen", "dataset"]
 
 
@@ -78,9 +81,20 @@ def run(args: argparse.Namespace) -> None:
     # z-score the affinity within each normalization group
     df = normalize_affinity(df, by=("norm_group",), method="zscore")
 
+    # sequence-size metadata so downstream knows what will/won't fit the model context.
+    # Antibody (heavy[+light]) fits in 512; antigens can exceed it — flag truncation.
+    df = df.with_columns(
+        pl.col("heavy").str.len_chars().alias("heavy_len"),
+        pl.col("light").str.len_chars().alias("light_len"),
+        pl.col("target").str.len_chars().alias("target_len"),
+    ).with_columns(
+        (pl.col("target_len") > ANTIGEN_MAX_LEN).alias("target_truncated")
+    )
+
     df = df.select(
         ["heavy", "light", "target", "affinity", "affinity_norm",
-         "source", "antigen", "norm_group", "dataset"]
+         "source", "antigen", "norm_group", "dataset",
+         "heavy_len", "light_len", "target_len", "target_truncated"]
     )
 
     out.parent.mkdir(parents=True, exist_ok=True)
