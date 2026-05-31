@@ -192,7 +192,7 @@ resolution without requiring pooling.
 
 - Model ID: `Exscientia/IgBert`; hidden dim 1024 (BERT-large scale).
 - Input format: space-separated amino acids — `"E V Q L V E S ..."`.
-- Use the [CLS] token (index 0 of `last_hidden_state`) as the sequence embedding.
+- Sequence embedding = **mean pooling over residue positions** (excluding special tokens), per ISSUE 2 — not the CLS token.
 - On CPU: ~30 min for 67k sequences; always pass `cache_path` to `embed_and_reduce()` to save raw embeddings. Name caches `{dataset}_{model_key}_{n_components}d.npy`.
 - Load report shows UNEXPECTED `cls.predictions` keys — expected and harmless (MLM head unused).
 

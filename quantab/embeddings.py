@@ -40,7 +40,7 @@ REGISTRY: dict[str, ModelConfig] = {
         hf_name="Exscientia/IgBert",
         hidden_dim=1024,
         space_sep=True,
-        pool="cls",
+        pool="mean",   # MEMORY.md ISSUE 2: residue-mean, not CLS (IgBERT's pooler is untrained)
         paired=False,
     ),
     "esm2_35M": ModelConfig(
@@ -68,7 +68,7 @@ REGISTRY: dict[str, ModelConfig] = {
         hf_name="brineylab/BALM-paired",
         hidden_dim=1024,
         space_sep=False,
-        pool="cls",
+        pool="mean",   # MEMORY.md ISSUE 2: residue-mean over VH+VL, not CLS
         paired=True,   # passes heavy and light as two sequences to the tokenizer
     ),
 }
@@ -96,10 +96,18 @@ def _prepare(seq: str, space_sep: bool) -> str:
     return " ".join(seq.strip()) if space_sep else seq.strip()
 
 
-def _pool(hidden: torch.Tensor, attention_mask: torch.Tensor, strategy: str) -> np.ndarray:
+def _pool(hidden: torch.Tensor, pool_mask: torch.Tensor, strategy: str) -> np.ndarray:
+    """Collapse per-token hidden states to one vector per sequence.
+
+    strategy="mean": average over real residue positions only (``pool_mask`` already
+      excludes padding AND special tokens — CLS/SEP/EOS). This is the project default;
+      every position (including HCDR3) contributes. See MEMORY.md ISSUE 2.
+    strategy="cls": the first token only — kept for ablation, NOT recommended (the CLS
+      token is not trained to summarize binding for these MLM models).
+    """
     if strategy == "cls":
         return hidden[:, 0, :].cpu().float().numpy()
-    mask = attention_mask.unsqueeze(-1).float()
+    mask = pool_mask.unsqueeze(-1).float()
     summed = (hidden * mask).sum(dim=1)
     counts = mask.sum(dim=1).clamp(min=1e-9)
     return (summed / counts).cpu().float().numpy()
@@ -147,6 +155,7 @@ def extract_embeddings(
                 padding=True,
                 truncation=True,
                 max_length=max_length,
+                return_special_tokens_mask=True,
             ).to(device)
         else:
             enc = tokenizer(
@@ -155,10 +164,15 @@ def extract_embeddings(
                 padding=True,
                 truncation=True,
                 max_length=max_length,
+                return_special_tokens_mask=True,
             ).to(device)
 
+        # mean pooling averages over real residues only: drop padding AND special
+        # tokens (CLS/SEP/EOS) so every contributing position is an amino acid.
+        special = enc.pop("special_tokens_mask")
+        pool_mask = enc["attention_mask"] * (1 - special)
         out = model(**enc)
-        emb = _pool(out.last_hidden_state, enc["attention_mask"], cfg.pool)
+        emb = _pool(out.last_hidden_state, pool_mask, cfg.pool)
         all_embeddings.append(emb)
 
     return np.vstack(all_embeddings)
