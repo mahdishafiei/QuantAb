@@ -113,9 +113,10 @@ def run(args: argparse.Namespace) -> None:
                 print(f"  [{tag}] raw embeddings exist, loading from cache.")
                 raw = np.load(raw_path)
             else:
-                print(f"  [{tag}] extracting embeddings for {len(df)} sequences (embed={args.embed})...")
+                print(f"  [{tag}] extracting embeddings for {len(df)} sequences (embed={args.embed}, max_length={args.max_length})...")
                 seqs = get_sequences(df, cfg, embed=args.embed)
-                raw = extract_embeddings(seqs, tok, model, cfg, batch_size=BATCH_SIZE)
+                raw = extract_embeddings(seqs, tok, model, cfg, batch_size=BATCH_SIZE,
+                                         max_length=args.max_length)
                 np.save(raw_path, raw)
                 print(f"  [{tag}] saved raw embeddings → {raw_path}  shape={raw.shape}")
 
@@ -182,6 +183,12 @@ def parse_args() -> argparse.Namespace:
         default="antibody",
         choices=["antibody", "target"],
         help="What to embed: 'antibody' (heavy[+light]) or 'target' (antigen sequence).",
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=512,
+        help="Max tokens. Antibody fits in 512; use 1024 for antigen (ESM-2 context).",
     )
     parser.add_argument(
         "--output-dir",

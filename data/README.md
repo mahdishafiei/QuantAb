@@ -8,12 +8,19 @@ the code reads them from a local path. This file documents what we have and how 
 ```
 s3://scrippsresearch-mshafiei-hackathon/
 ├── curated_data/
-│   ├── unified_affinity.csv     ← USE THIS: merged, normalized, regression-ready
+│   ├── unified_affinity_v2.csv  ← USE THIS: ready-to-go, normalized, with size metadata
+│   ├── unified_affinity.csv     prior version (kept; no size columns)
 │   ├── filtered_data.csv        DMS binding data (Phillips/Dailey/MAGMA-seq)
 │   └── ANDD_dataset.xlsx        Terrence's unified Ab/Nb–antigen affinity collection
 ├── DMS_Data/                    raw deep-mutational-scanning sources
 └── embeddings/                  cached model embeddings (one subdir per model)
 ```
+
+> **v2 (2026-05-31)** is the blessed ready-to-go version: identical rows to v1, audited
+> (0 missing, 0 dup sequence-triples, `affinity_norm` finite), plus `heavy_len / light_len /
+> target_len / target_truncated` size columns. Antibodies fully fit the 512-token context
+> (max combined 471); embed antigens with `--max-length 1024` — only **146 / 40,937** antigens
+> still exceed that.
 
 Read access is granted to everyone in the hackathon account, so teammates pull with their
 own SSO profile — no shared credentials.
@@ -39,6 +46,8 @@ run an affinity regression.
 | `source`, `antigen` | provenance + antigen name |
 | `norm_group` | normalization unit (per source×antigen for DMS; one block for ANDD) |
 | `dataset` | `phillips2021` / `dailey` / `magma_seq` / `ANDD` |
+| `heavy_len` / `light_len` / `target_len` | sequence lengths (residues) — v2 |
+| `target_truncated` | True if antigen > 1024 tokens (truncated when embedded) — v2 |
 
 ### Why `affinity_norm`?
 The rows come from different assays/protocols (Tite-seq, KD tables, MAGMA-seq yeast display,
@@ -52,20 +61,25 @@ a single regression sees a consistent target. Use `affinity_norm` as the label; 
 - ANDD rows without a heavy chain, antigen sequence, or a sane measured KD (1 pM–1 mM); predicted KDs excluded.
 - From Terrence's bucket: PLAbDab (sequences only, no labels), SARS2 escape (escape ≠ KD),
   IEDB epitopes (categorical), AB-Bind (ΔΔG, a different quantity).
+- **New affinity files (assessed 2026-05-31, not folded in):** `affinity/antibody_affinity_sabdab.csv`
+  has its `Y` label all 0.0 (no usable values); `affinity/skempi_v2.csv` is PDB+mutation only
+  (no sequences without resolving structures); `affinity/alphaseq/...` has antibody seqs +
+  affinity but **no antigen sequence** (target is a name) — usable for antibody-only later, not
+  for the two-modality setup.
 
 ## Rebuild it
 ```bash
 python scripts/build_unified_affinity.py \
   --curated curated_data/filtered_data.csv \
   --andd    curated_data/ANDD_dataset.xlsx \
-  --out     curated_data/unified_affinity.csv
+  --out     curated_data/unified_affinity_v2.csv
 ```
 
 ## Programmatic load
 ```python
 from pathlib import Path
 from quantab.data import load_unified
-df = load_unified(Path("curated_data/unified_affinity.csv"))
+df = load_unified(Path("curated_data/unified_affinity_v2.csv"))
 ```
 
 ## Source provenance
