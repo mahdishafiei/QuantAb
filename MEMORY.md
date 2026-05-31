@@ -96,6 +96,75 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 
 ---
 
+## ⚠ CRITICAL ISSUES — must be enforced in every iteration, especially the final one
+
+> **For Mahdi and Terrence:** these are non-negotiable correctness requirements, not preferences.
+> They also need to be acknowledged explicitly in the paper Methods and/or Discussion.
+
+---
+
+### ISSUE 1 — Data leakage via PCA fitted on the full dataset
+
+**What:** PCA (and any other unsupervised DR step) must be fitted **on the training split only**,
+then applied (transform-only) to the validation and test splits.
+
+**Why it matters:** Fitting PCA on all rows — including the test set — leaks test-set distributional
+information into the feature space. Results will be optimistically biased. This is particularly
+damaging for learning-curve analyses where small training sets are compared to large ones:
+the PCA "saw" all 40k sequences regardless of training size.
+
+**Enforcement:**
+```python
+# CORRECT
+pca.fit(X_train)
+X_train_r = pca.transform(X_train)
+X_test_r  = pca.transform(X_test)   # never fit on test
+
+# WRONG — what the current pipeline likely does
+pca.fit(X_all)   # leaks test distribution into PCA axes
+```
+
+The current `unified_6d/10d.npy` embeddings on S3 were computed on all 40k rows — they
+**cannot be used as-is for honest evaluation**. PCA must be re-run per train/test fold.
+Raw embeddings (`unified_raw.npy`, ~160–200 MB per model) are on S3 and can be used
+to redo this correctly without re-running model inference.
+
+**Paper mention:** Methods — note that PCA projection is fitted on the training split of each
+cross-validation fold and applied to the held-out fold.
+
+---
+
+### ISSUE 2 — CLS token pooling is not acceptable
+
+**What:** Do **not** use the CLS token as the sequence embedding for IgBERT or BALM-paired.
+Use **mean pooling over all position embeddings** instead.
+
+**Why it matters:** The CLS token was trained for sequence-level classification tasks. There is
+no guarantee it encodes binding-interface geometry or CDR-loop conformation. For affinity
+prediction, the signal lives in specific positions (especially HCDR3); CLS may ignore them
+entirely. Mean pooling is lossy too, but at least every position — including HCDR3 — contributes.
+
+**Enforcement:** Mean pooling over the full recombined VH+VL sequence (post-VDJ — HCDR3 is
+present). Do not truncate to V-gene only (that cuts off before the CDR3 junction).
+
+```python
+# CORRECT — mean over all token positions (excluding special tokens)
+embedding = model_output.last_hidden_state[:, 1:-1, :].mean(dim=1)
+
+# WRONG — current Mahdi implementation
+embedding = model_output.last_hidden_state[:, 0, :]  # CLS token only
+```
+
+The current `unified_raw.npy` / `unified_6d/10d.npy` files were computed with CLS pooling
+for IgBERT and BALM-paired — **they need to be regenerated** with mean pooling.
+ESM2 already uses mean pooling and is unaffected.
+
+**Paper mention:** Methods — state mean pooling was used. Discussion — acknowledge this as a
+known limitation; ideal solution is a length-constrained model that preserves per-position
+resolution without requiring pooling.
+
+---
+
 ## Design decisions (settled)
 
 | Decision | Choice | Rationale |
