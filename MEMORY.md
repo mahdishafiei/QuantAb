@@ -42,23 +42,31 @@ Rationale: fix data size, vary model capacity — cleanest comparison axis. But 
 
 ### Embedding layer selection
 
-Which layer(s) of the AbLM to extract embeddings from?
-- Last hidden state (most common)?
-- Pool across layers?
-- CDR-only tokens vs. full sequence?
+**Decision (2026-05-31): last hidden state, mean pooling for PLSR/quantum arm; full per-position for CNN/BiLSTM arm.**
 
-CDR-only might be more relevant for binding but reduces token count. Need to decide before extraction. (Current code uses last hidden state — [CLS] pooling for IgBERT/BALM, mean pooling for ESM-2.)
+- **Layer:** last hidden state throughout (standard practice, no evidence layer averaging helps here).
+- **Pooling for PLSR/quantum/classical-kernel arm:** mean over all position embeddings excluding [CLS] and [SEP] — `last_hidden_state[:, 1:-1, :].mean(dim=1)`. CLS rejected (see ISSUE 2).
+- **CNN/BiLSTM arm:** no pooling — full `last_hidden_state[:, 1:-1, :]` tensor `(seq_len, hidden_dim)` saved as `unified_pos.npy`. Models learn task-conditioned aggregation. CDRs are not pre-selected — the model discovers positional importance from data.
+- **Sequences:** full recombined VH+VL (post-VDJ). HCDR3 is included. Do NOT use V-gene only.
+- **Max length for per-position storage:** 256 tokens (covers >99% of VH+VL sequences). Saved as float16 to manage disk usage (~21 GB for IgBERT on 40k sequences).
 
 ---
 
 ### PCA vs. other dimensionality reduction
 
-PCA is the default and most interpretable. But:
-- UMAP could preserve local structure better (relevant for kernel methods)
-- Learned linear projections (supervised dimensionality reduction) could be stronger but risk overfitting with small data
-- Random projections as a null baseline?
+**Decision updated 2026-05-31: PLSR is now the primary DR method.**
 
-**Decision for hackathon:** PCA. Keep it simple. Explore alternatives in the paper.
+| Method | Role | When fit | Label-aware |
+|--------|------|----------|-------------|
+| **PLSR** | **Primary — hackathon + paper** | Per fold on train only | ✓ maximises covariance with pKd |
+| PCA | Negative control | Per fold on train only | ✗ high-variance directions only |
+| Random projection | Null baseline | Per fold | ✗ |
+
+**Why PLSR beats PCA for this task:** PCA finds the directions of maximum variance in the embedding space — these are dominated by sequence diversity unrelated to binding. PLSR finds the directions maximally covariant with pKd labels. With ~1024-dim IgBERT embeddings, the binding-relevant subspace is small; PLSR projects directly into it.
+
+**Implemented in:** `quantab/embeddings.py` (`fit_plsr`) and `quantab/evaluation.py` (`_reduce_fold`). Use `--dr plsr` (default) in `run_two_register.py`. PCA is `--dr pca`, pre-reduced files are `--dr none`.
+
+**For CNN/BiLSTM:** No DR applied — the model learns its own task-conditioned aggregation over per-position embeddings.
 
 ---
 
@@ -105,7 +113,12 @@ For Amazon Braket (real quantum hardware): possible future extension, not in hac
 
 ### ISSUE 1 — Data leakage via PCA fitted on the full dataset
 
-**What:** PCA (and any other unsupervised DR step) must be fitted **on the training split only**,
+**STATUS: FIXED in `scripts/run_two_register.py` + `quantab/evaluation.py` (2026-05-31).**
+The new pipeline fits DR *inside* each learning-curve fold on training data only.
+The old pre-reduced `unified_6d/10d.npy` files on S3 are still contaminated — do not use them
+for final evaluation. Use `--dr plsr` or `--dr pca` with the raw files instead.
+
+**What:** PCA (and any other DR step) must be fitted **on the training split only**,
 then applied (transform-only) to the validation and test splits.
 
 **Why it matters:** Fitting PCA on all rows — including the test set — leaks test-set distributional
@@ -113,24 +126,20 @@ information into the feature space. Results will be optimistically biased. This 
 damaging for learning-curve analyses where small training sets are compared to large ones:
 the PCA "saw" all 40k sequences regardless of training size.
 
-**Enforcement:**
+**How the fix works (`quantab/evaluation.py` → `_reduce_fold`):**
 ```python
-# CORRECT
-pca.fit(X_train)
-X_train_r = pca.transform(X_train)
-X_test_r  = pca.transform(X_test)   # never fit on test
-
-# WRONG — what the current pipeline likely does
-pca.fit(X_all)   # leaks test distribution into PCA axes
+# Inside each learning-curve fold:
+if dr == "plsr":
+    m = PLSRegression(n_components).fit(X_raw_train, y_train)   # uses labels
+elif dr == "pca":
+    m = PCA(n_components).fit(X_raw_train)                       # no labels
+X_tr = m.transform(X_raw_train)
+X_te = m.transform(X_raw_test)   # never fit on test
 ```
 
-The current `unified_6d/10d.npy` embeddings on S3 were computed on all 40k rows — they
-**cannot be used as-is for honest evaluation**. PCA must be re-run per train/test fold.
-Raw embeddings (`unified_raw.npy`, ~160–200 MB per model) are on S3 and can be used
-to redo this correctly without re-running model inference.
+Raw embeddings (`unified_raw.npy`, ~160–200 MB per model) are on S3.
 
-**Paper mention:** Methods — note that PCA projection is fitted on the training split of each
-cross-validation fold and applied to the held-out fold.
+**Paper mention:** Methods — note that DR is fitted on the training split of each fold.
 
 ---
 
@@ -178,11 +187,13 @@ resolution without requiring pooling.
 | Target model | ESM2 | Standard protein LM; pooled sequence embedding |
 | Pooling strategy | Mean pooling over full sequence | CLS rejected (no guarantee it encodes binding-relevant features). Mean over full recombined VH+VL (post-VDJ — HCDR3 is included). V-gene alone is NOT enough (cuts off before HCDR3 junction). Diluted but present. Long-term fix: length-constrained model for full per-position embeddings. |
 | Embedding pipeline | Separate extraction → separate normalize → separate PCA → two-register quantum / concatenate classical | Modalities are heterogeneous; joint PCA without normalization is dominated by largest space |
-| DR method (hackathon) | PCA per modality | Unsupervised, no label leakage, interpretable |
-| DR method (paper) | PCA + PLSR + random projection | PLSR maximizes label covariance; random projection is null baseline |
+| DR method (primary) | **PLSR per modality, per fold** | Supervised; finds pKd-covariant directions; fits on train only |
+| DR method (negative control) | PCA per modality, per fold | Unsupervised; blurs affinity signal; shows cost of ignoring labels |
+| DR method (null baseline) | Random projection | Paper only; one line of code |
 | Quantum circuit topology | Two-register (ab register ‖ target register) + entangling gates | Tensor product H_ab ⊗ H_target naturally represents interaction; exponentially richer than concatenation |
 | Key ablation | Single-register on concatenated features | Isolates benefit of tensor product structure from quantum kernel benefit generally |
-| Classical baselines | Linear/RBF/Polynomial SVM + Random Forest + MLP | Standard kernel zoo, non-kernel reference, and neural baseline |
+| Classical baselines | RBF-SVR + Linear SVR + Random Forest + MLP | Kernel zoo + non-kernel reference; RBF-SVR is direct apples-to-apples vs quantum kernel |
+| Classical ceiling | **CNN + BiLSTM on per-position IgBERT embeddings** | Learned aggregation bypasses pooling; expected to outperform fixed-pool methods |
 | Data storage | S3 mirror, not committed to git | DMS data ~162 MB; `s3://scrippsresearch-mshafiei-hackathon/`, see `data/README.md` |
 | Approach to results | Benchmark, not advocacy | We report what we find. Negative results are valuable. |
 
@@ -231,6 +242,90 @@ is the stronger scientific story and naturally tests the small-data hypothesis.
   embeddings (expect ~30–60 PCs for IgBERT). Do not fix in advance.
 - Learning curves: N = 50, 100, 200, 500, 1000, 2000.
 - "Small-data" framing recovers via cross-distribution generalization, not random subsampling.
+
+---
+
+### 2026-05-31 — Quantum implementation, PLSR, CNN/BiLSTM (Benjamin + Claude)
+
+**All quantum and sequence-model code is on `master`.** This entry documents what was built and why.
+
+#### Two-register quantum kernels (`quantab/quantum_kernels.py`)
+
+Two new kernel functions now live alongside Mahdi's single-register ablation kernels:
+
+- `build_two_register_minimal_kernel(n_qubits_ab, n_qubits_tgt)` — single-layer: angle-encode each register, intra-register CNOT chain, then a cross-register CNOT (last ab qubit → first tgt qubit).
+- `build_two_register_expressive_kernel(n_qubits_ab, n_qubits_tgt, depth=2)` — multi-layer version; adds a reverse cross-register CNOT for bidirectional entanglement.
+
+Both accept a **concatenated input vector** `x = [x_ab | x_tgt]` and split internally at `n_qubits_ab`. This keeps the API identical to the single-register kernels (`kernel(x1, x2) → float`) so they drop straight into `build_kernel_matrix` and `learning_curve`.
+
+Also added: `VQCRegressor` — a variational circuit regressor (StronglyEntanglingLayers + PauliZ(0) readout, Adam optimizer, internal z-score scaling). Sklearn-compatible.
+
+#### PLSR replaces PCA as primary DR (ISSUE 1 fixed simultaneously)
+
+The DR step now runs **per fold** inside `learning_curve` (`quantab/evaluation.py` → `_reduce_fold`). This fixes the data leakage in one move: whether you choose PLSR or PCA, it is always fit on training data only.
+
+- **PLSR** (`--dr plsr`, default): supervised, `PLSRegression` fits on `(X_train, y_train)`. Projects into the subspace maximally covariant with pKd — far more informative than PCA for affinity tasks.
+- **PCA** (`--dr pca`): fit per fold on `X_train` only. Serves as the negative control — Benjamin's prediction is that PCA will perform noticeably worse than PLSR because it blurs affinity signal.
+- **`--dr none`**: load pre-reduced `unified_{n}d.npy` files (fast sanity check only; known to have leakage from old extraction).
+
+The old pre-reduced files on S3 are not deleted but should NOT be used for final evaluation.
+
+#### CNN and BiLSTM regressors on per-position embeddings (`quantab/sequence_models.py`)
+
+Two sklearn-compatible PyTorch models that operate on the full `(N, max_len, hidden_dim)` per-position embedding tensor, bypassing fixed pooling entirely:
+
+- `CNNRegressor` — three parallel Conv1D (kernel widths 3, 5, 7), global max pool with padding mask. Learns which positional motifs (CDRs) activate strongest.
+- `BiLSTMRegressor` — bidirectional LSTM with packed sequences, mean pool over valid positions. Captures long-range context the CNN misses.
+
+Lengths inferred from zero padding (valid positions have `|x_i|₁ > 1e-4`). Labels z-scored internally. Both drop into `learning_curve` with `dr="none"`.
+
+**These are the classical ceiling** — the question is how much they outperform PLSR+SVR (i.e., how much is lost by the pooling step, and how much is recoverable by task-conditioned aggregation).
+
+#### Per-position extraction script (`scripts/extract_position_embeddings.py`)
+
+Saves `last_hidden_state[:, 1:-1, :]` (CLS/SEP excluded) as:
+- `unified_pos.npy` — `float16 (N, max_len, hidden_dim)`, zero-padded. Default `max_len=256`.
+- `unified_lengths.npy` — `int32 (N,)`.
+
+Storage: ~21 GB for IgBERT on 40k sequences (float16). Fits on EC2 EBS (100 GB). Use `--limit 500` for a dry run first.
+
+```bash
+# Run on EC2 after syncing data
+python scripts/extract_position_embeddings.py \
+    --unified curated_data/unified_affinity.csv \
+    --model igbert --max-len 256
+```
+
+#### Experiment runner (`scripts/run_two_register.py`)
+
+Primary script for the hackathon. Runs all method arms in one shot:
+
+| Arm | Key | DR | Input |
+|-----|-----|----|-------|
+| Classical (joint ab+tgt) | `mlp`, `rbf_svm`, `random_forest`, `linear_svm` | PLSR (default) | raw embeddings → 2n concat |
+| Classical (ab only) | `*_ab_only` | PLSR | raw ab embeddings → n |
+| Single-register quantum | `quantum_minimal`, `quantum_expressive` | PLSR | raw → 2n concat |
+| Two-register quantum | `two_reg_minimal`, `two_reg_expressive` | PLSR | raw → [n ab \| n tgt] |
+| VQC | `vqc` | PLSR | raw → 2n concat |
+| CNN (ab only) | `cnn` | none | unified_pos.npy |
+| BiLSTM (ab only) | `bilstm` | none | unified_pos.npy |
+
+Output: `results/two_reg_igbert_esm2_650M_plsr_10d.json` (one file per DR × n_components config).
+
+#### One-command EC2 launch (`scripts/run_on_ec2.sh`)
+
+```bash
+bash scripts/run_on_ec2.sh          # sync code + S3 embeddings + launch tmux
+bash scripts/run_on_ec2.sh --shell  # interactive SSH
+bash scripts/run_on_ec2.sh --sync-only
+```
+
+#### What is NOT yet done
+
+- **Cross-distribution eval split** (train Phillips, test Dailey + MAGMA-seq) — deferred until data is final; current pipeline uses random splits.
+- **Mean pooling fix for IgBERT/BALM** — IgBERT and BALM-paired embeddings on S3 still use CLS pooling. Must regenerate `unified_raw.npy` with `last_hidden_state[:, 1:-1, :].mean(1)` before final evaluation.
+- **Per-position extraction not yet run** — `unified_pos.npy` does not exist yet; CNN/BiLSTM skip gracefully until it does.
+- **GPU quota** — still 0; all simulation on CPU. Request via AWS organizers for `g4dn.xlarge`.
 
 ---
 
