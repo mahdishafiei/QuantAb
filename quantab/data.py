@@ -246,4 +246,7 @@ def load_all(data_dir: Path) -> pl.DataFrame:
 
 def summarize(df: pl.DataFrame) -> None:
     print(f"Total variants: {len(df)}")
-    print(df.group_by("dataset").agg(pl.len().alias("n")).sort("n", descending=True))
+    # group by a provenance column if present; never crash if it isn't
+    col = next((c for c in ("dataset", "source", "antigen") if c in df.columns), None)
+    if col:
+        print(df.group_by(col).agg(pl.len().alias("n")).sort("n", descending=True))

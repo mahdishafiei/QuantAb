@@ -59,52 +59,53 @@ Spearman ρ  vs.  training set size  →  learning curves
 
 ## Dataset
 
-All models are benchmarked on one merged, normalized table — **`unified_affinity_v2.csv`**
-(**40,937 antibody–antigen pairs, 1,041 antigens**, 0 missing). Each row = an antibody
-(heavy + light) + an antigen sequence + a measured binding affinity. Built by
-`scripts/build_unified_affinity.py`; stored on S3 (not committed).
+All models are benchmarked on one merged, normalized table — **`unified_affinity_v3.csv`**
+(**114,300 antibody–antigen pairs, 357 antigens**, 0 missing, all paired). Each row = an antibody
+(heavy + light) + an antigen sequence + a measured binding affinity. Built from the team's
+affinity-sourcing corpus, cleaned + normalized by `scripts/build_corpus_dataset.py`; stored on S3.
 
 | Source | System | Rows | Antigen |
 |---|---|---|---|
-| Phillips et al. 2021 | CR9114 anti-influenza DMS | 33,345 | flu H1-HA |
-| Dailey | CR9114 single-mutants | 4,196 | flu H1/H3-HA |
-| ANDD (SAbDab / PDB / sdAb / INDI / …) | diverse antibodies + nanobodies | 3,310 | 1,000+ antigens |
-| MAGMA-seq | 4A8 / CC12.1 | 86 | SARS-CoV-2 |
+| Phillips 2021 | CR9114 anti-influenza DMS | 67,033 | flu HA |
+| Engelhart 2022 (AlphaSeq) | anti-VEGF campaign | 42,381 | VEGF |
+| Dailey 2021 | CR9114 single-mutants | 3,699 | flu HA |
+| ANDD 2026 | diverse SAbDab / PDB / sdAb | 702 | many |
+| Shanehsazzadeh 2023 | trastuzumab | 421 | HER2 |
+| MAGMA-seq 2022 | 4A8 / CC12.1 | 64 | SARS-CoV-2 |
 
 - **Label:** `affinity` = pKd (−log10 KD); **`affinity_norm`** = pKd z-scored within each
-  (protocol, antigen) group — the regression target. (Rows pool different assays/scales, so raw KD
-  isn't comparable across them; normalization makes one consistent target.)
-- **Coverage is uneven:** every row has a KD, but ~⅔ of antigens have a single measurement and the
-  top 3 antigens (flu / HER2) are ~93% of rows — deep on flu/CR9114, thin elsewhere.
-- **Not directly usable, so excluded:** PLAbDab (no labels), SARS2 escape (escape ≠ KD), IEDB
-  epitopes (categorical), AB-Bind (ΔΔG), and SAbDab-affinity/SKEMPI/AlphaSeq (no labels / no
-  sequences / no antigen sequence).
+  (method, antigen) group — the regression target. (Rows pool assays with different scales, so raw
+  KD isn't comparable; per-group normalization makes one consistent target.)
+- **Measured methods only** (predicted KDs dropped). **Coverage is uneven / 2-antigen-dominated**:
+  Flu + VEGF ≈ 99% of rows, and 250 antigens are singletons.
+- **Excluded** (not usable): PLAbDab (no labels), SARS2 escape (escape ≠ KD), IEDB epitopes
+  (categorical), AB-Bind (ΔΔG), SKEMPI (no sequences).
 
 Full details: [`data/README.md`](data/README.md) and [`results-classic.md`](results-classic.md).
-S3: `s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity_v2.csv`
+S3: `s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity_v3.csv`
 
 ---
 
 ## Results
 
 Binding-affinity regression from each model's mean-pooled embeddings on
-`unified_affinity_v2.csv` (40,937 rows, 1,041 antigens). 5-fold cross-validation **holding out
+`unified_affinity_v3.csv` (114,300 rows, 357 antigens). 5-fold cross-validation **holding out
 whole antigens** (each model is scored on antigens it never saw in training).
 
 | Model | Spearman ρ ↑ | Pearson r ↑ | R² ↑ | RMSE ↓ | Recall@10% ↑ |
 |---|---|---|---|---|---|
-| **IgBERT** | **0.51** | **0.51** | **0.10** | **0.93** | **0.24** |
-| ESM-2 650M | 0.38 | 0.38 | −0.54 | 1.11 | 0.23 |
-| BALM-paired | 0.38 | 0.37 | −0.10 | 1.02 | 0.18 |
+| **IgBERT** | **0.31** | **0.26** | −0.39 | 1.12 | **0.14** |
+| BALM-paired | 0.23 | 0.15 | −0.28 | 1.08 | 0.12 |
+| ESM-2 650M | 0.16 | 0.12 | −0.35 | 1.12 | 0.12 |
 
 - **Spearman ρ / Pearson r** — rank / linear correlation of predicted vs measured affinity.
 - **R²** — fraction of variance explained (negative = worse than just predicting the mean).
 - **RMSE** — error in normalized affinity units (lower is better).
 - **Recall@10%** — share of the true strongest binders recovered in the model's top 10% (random ≈ 0.10).
 
-**IgBERT (antibody-specific) is best on every metric**, and the only model with positive R².
-Adding the antigen embedding doesn't help (data is mostly influenza). A plain random split gives
-ρ ≈ 0.9 for all models, but that overstates real performance.
+**IgBERT (antibody-specific) is best on every metric.** Generalizing to *unseen antigens* is hard
+here (all R² negative), so Spearman/Recall are the meaningful comparison. Adding the antigen
+embedding doesn't help (data is Flu+VEGF-dominated).
 
 **Inputs:** IgBERT and ESM-2 take VH+VL concatenated (no separator); BALM-paired takes them as a
 native pair (`<s> VH </s></s> VL </s>`). All three are mean-pooled over residues.
