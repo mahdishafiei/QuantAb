@@ -73,16 +73,24 @@ continuous binding measurements (KD or enrichment score):
 ## Results
 
 Binding-affinity regression from each model's mean-pooled embeddings on
-`unified_affinity_v2.csv` (40,937 rows, 1,041 antigens).
+`unified_affinity_v2.csv` (40,937 rows, 1,041 antigens). ρ = Spearman correlation between
+predicted and measured affinity.
 
-| Model | Spearman ρ |
-|---|---|
-| IgBERT | **0.48** |
-| ESM-2 650M | 0.45 |
-| BALM-paired | 0.42 |
+| Model | ρ (antibody) | ρ (antibody + antigen) | ρ (random split, ref.) |
+|---|---|---|---|
+| **IgBERT** | **0.48 ± 0.13** | 0.44 ± 0.14 | 0.90 |
+| ESM-2 650M | 0.45 ± 0.18 | 0.45 ± 0.19 | 0.91 |
+| BALM-paired | 0.42 ± 0.11 | 0.38 ± 0.23 | 0.89 |
 
-Spearman correlation between predicted and measured affinity (5-fold cross-validation, held-out
-antigens). Details in [RESULTS.md](RESULTS.md).
+- **antibody** — features from the antibody embedding only. **+ antigen** — also adds the antigen
+  embedding; it doesn't help here because the data is mostly one antigen family (influenza).
+- Main columns use 5-fold CV **holding out whole antigens**, i.e. the model is scored on antigens
+  it never saw in training. IgBERT is best.
+- **random split** is a reference only: rows are shuffled instead of grouped, so the test set
+  closely resembles training (most rows are single-mutant variants) — which is why it looks much
+  higher and overstates real performance.
+
+Details in [RESULTS.md](RESULTS.md).
 
 ---
 
