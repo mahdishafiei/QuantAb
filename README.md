@@ -73,24 +73,23 @@ continuous binding measurements (KD or enrichment score):
 ## Results
 
 Binding-affinity regression from each model's mean-pooled embeddings on
-`unified_affinity_v2.csv` (40,937 rows, 1,041 antigens). ρ = Spearman correlation between
-predicted and measured affinity.
+`unified_affinity_v2.csv` (40,937 rows, 1,041 antigens). 5-fold cross-validation **holding out
+whole antigens** (each model is scored on antigens it never saw in training).
 
-| Model | ρ (antibody) | ρ (antibody + antigen) | ρ (random split, ref.) |
-|---|---|---|---|
-| **IgBERT** | **0.48 ± 0.13** | 0.44 ± 0.14 | 0.90 |
-| ESM-2 650M | 0.45 ± 0.18 | 0.45 ± 0.19 | 0.91 |
-| BALM-paired | 0.42 ± 0.11 | 0.38 ± 0.23 | 0.89 |
+| Model | Spearman ρ ↑ | Pearson r ↑ | R² ↑ | RMSE ↓ | Recall@10% ↑ |
+|---|---|---|---|---|---|
+| **IgBERT** | **0.51** | **0.51** | **0.10** | **0.93** | **0.24** |
+| ESM-2 650M | 0.38 | 0.38 | −0.54 | 1.11 | 0.23 |
+| BALM-paired | 0.38 | 0.37 | −0.10 | 1.02 | 0.18 |
 
-- **antibody** — features from the antibody embedding only. **+ antigen** — also adds the antigen
-  embedding; it doesn't help here because the data is mostly one antigen family (influenza).
-- Main columns use 5-fold CV **holding out whole antigens**, i.e. the model is scored on antigens
-  it never saw in training. IgBERT is best.
-- **random split** is a reference only: rows are shuffled instead of grouped, so the test set
-  closely resembles training (most rows are single-mutant variants) — which is why it looks much
-  higher and overstates real performance.
+- **Spearman ρ / Pearson r** — rank / linear correlation of predicted vs measured affinity.
+- **R²** — fraction of variance explained (negative = worse than just predicting the mean).
+- **RMSE** — error in normalized affinity units (lower is better).
+- **Recall@10%** — share of the true strongest binders recovered in the model's top 10% (random ≈ 0.10).
 
-Details in [RESULTS.md](RESULTS.md).
+**IgBERT (antibody-specific) is best on every metric**, and the only model with positive R².
+Adding the antigen embedding doesn't help (data is mostly influenza). A plain random split gives
+ρ ≈ 0.9 for all models, but that overstates real performance — see [RESULTS.md](RESULTS.md).
 
 ---
 
