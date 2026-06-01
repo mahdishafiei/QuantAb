@@ -150,8 +150,15 @@ def extract_embeddings(
     all_embeddings: list[np.ndarray] = []
     label = cfg.hf_name.split("/")[-1]
 
-    for i in tqdm(range(0, len(sequences), batch_size), desc=f"Extracting ({label})"):
-        batch = sequences[i : i + batch_size]
+    # De-duplicate identical inputs: the same sequence always yields the same embedding,
+    # so we embed only the unique ones and map back (huge speedup when sequences repeat,
+    # e.g. ~1k unique antigens across ~40k rows). Row order is preserved.
+    uniq = list(dict.fromkeys(sequences))
+    pos = {k: i for i, k in enumerate(uniq)}
+
+    for i in tqdm(range(0, len(uniq), batch_size),
+                  desc=f"Extracting ({label}; {len(uniq)} uniq / {len(sequences)})"):
+        batch = uniq[i : i + batch_size]
 
         if cfg.paired:
             # BALM-paired: tokenizer takes (heavy_list, light_list) as two sequences
@@ -184,7 +191,9 @@ def extract_embeddings(
         emb = _pool(out.last_hidden_state, pool_mask, cfg.pool)
         all_embeddings.append(emb)
 
-    return np.vstack(all_embeddings)
+    uniq_emb = np.vstack(all_embeddings)
+    # expand unique embeddings back to one row per input sequence
+    return uniq_emb[[pos[k] for k in sequences]]
 
 
 def fit_pca(embeddings: np.ndarray, n_components: int) -> tuple[PCA, np.ndarray]:
