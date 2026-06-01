@@ -11,7 +11,8 @@ Paper: Engelhart E et al. (2022) A dataset comprised of binding interactions
 
 Note on units: binding_score ≈ -log10(KD/M) (pseudo-KD from AlphaSeq).
        kd_nm = 10^(9 - binding_score)
-       Method flagged as "phage_display_alphaSeq" to distinguish from direct
+       Method flagged as "yeast_display_alphaSeq" (AlphaSeq is A-Alpha Bio's
+       yeast synthetic-agglutination assay) to distinguish from direct
        biophysical measurements.
 
 Target antigen: SARS-CoV-2 Spike heptad-repeat-2 (HR2) target peptide
@@ -49,7 +50,7 @@ CITATION = (
     "104,972 antibodies against a SARS-CoV-2 peptide. "
     "Protein Eng Des Sel 35:gzac009. doi:10.1093/protein/gzac009"
 )
-METHOD = "phage_display_alphaSeq"
+METHOD = "yeast_display_alphaSeq"
 GROSS_ANTIGEN = "SARS-CoV-2"
 FINE_ANTIGEN = "SARS-CoV-2-Spike-HR2"
 
@@ -115,7 +116,7 @@ def source_engelhart() -> pl.DataFrame:
                 pl.lit(False).alias("is_censored"),
                 pl.lit(None).cast(pl.Utf8).alias("censor_type"),
                 pl.lit(
-                    f"file={csv_name}; pseudo-KD from AlphaSeq phage-display pipeline"
+                    f"file={csv_name}; pseudo-KD from AlphaSeq yeast-display pipeline"
                 ).alias("notes"),
             ])
             .select([
