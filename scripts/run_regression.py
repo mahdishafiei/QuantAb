@@ -25,14 +25,31 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-from scipy.stats import spearmanr
+from scipy.stats import pearsonr, spearmanr
 from sklearn.decomposition import PCA
+from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold, KFold
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 ANTIBODY_MODELS = ["igbert", "esm2_650M", "balm_paired"]
+METRICS = ["spearman", "pearson", "r2", "rmse", "recall@10%"]
+
+
+def compute_metrics(y_true, y_pred) -> dict:
+    """Regression + retrieval metrics for comparing models on affinity prediction."""
+    n = len(y_true)
+    k = max(1, int(round(0.10 * n)))                       # top 10%
+    top_true = set(np.argsort(y_true)[-k:])
+    top_pred = set(np.argsort(y_pred)[-k:])
+    return {
+        "spearman": float(spearmanr(y_true, y_pred).statistic),   # rank correlation
+        "pearson": float(pearsonr(y_true, y_pred)[0]),            # linear correlation
+        "r2": float(r2_score(y_true, y_pred)),                    # variance explained
+        "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),  # error (std units)
+        "recall@10%": len(top_true & top_pred) / k,               # strong-binder retrieval
+    }
 
 
 def build_estimator(pca_dims: int) -> Pipeline:
@@ -46,18 +63,23 @@ def build_estimator(pca_dims: int) -> Pipeline:
     return Pipeline(steps)
 
 
-def cv_spearman(X, y, groups, pca_dims, n_splits=5):
+def cv_metrics(X, y, groups, pca_dims, n_splits=5) -> dict:
+    """Cross-validated metrics. Returns {metric: {mean, std}} averaged over folds."""
     if groups is not None:
         n_splits = min(n_splits, len(np.unique(groups)))
         splitter = GroupKFold(n_splits=n_splits).split(X, y, groups)
     else:
         splitter = KFold(n_splits=n_splits, shuffle=True, random_state=42).split(X)
-    scores = []
+    per_fold = []
     for tr, te in splitter:
         est = build_estimator(pca_dims)
         est.fit(X[tr], y[tr])
-        scores.append(spearmanr(y[te], est.predict(X[te])).statistic)
-    return float(np.mean(scores)), float(np.std(scores)), scores
+        per_fold.append(compute_metrics(y[te], est.predict(X[te])))
+    return {
+        mtr: {"mean": float(np.mean([f[mtr] for f in per_fold])),
+              "std": float(np.std([f[mtr] for f in per_fold]))}
+        for mtr in METRICS
+    }
 
 
 def run(args: argparse.Namespace) -> None:
@@ -77,24 +99,22 @@ def run(args: argparse.Namespace) -> None:
 
     models = ANTIBODY_MODELS if args.model == "all" else [args.model]
     results = {}
-    print(f"\n{'model':14s} {'antibody':>16s}" + ("   antibody+antigen" if args.antigen else ""))
+    hdr = f"{'model':13s} " + " ".join(f"{m:>11s}" for m in METRICS)
+    print("\n" + hdr); print("-" * len(hdr))
     for m in models:
         X = np.load(emb / m / "unified_raw.npy")
         y = np.load(emb / m / "unified_labels_norm.npy")
-        mean_ab, std_ab, sc_ab = cv_spearman(X, y, groups, args.pca)
-        line = f"{m:14s}   {mean_ab:.3f} ± {std_ab:.3f}"
-        results[m] = {"antibody": {"mean": mean_ab, "std": std_ab, "scores": sc_ab}}
+        ab = cv_metrics(X, y, groups, args.pca)
+        results[m] = {"antibody": ab}
+        print(f"{m:13s} " + " ".join(f"{ab[mt]['mean']:>11.3f}" for mt in METRICS))
         if antigen is not None:
-            Xj = np.hstack([X, antigen])
-            mean_j, std_j, sc_j = cv_spearman(Xj, y, groups, args.pca)
-            line += f"     {mean_j:.3f} ± {std_j:.3f}"
-            results[m]["antibody_antigen"] = {"mean": mean_j, "std": std_j, "scores": sc_j}
-        print(line)
+            results[m]["antibody_antigen"] = cv_metrics(np.hstack([X, antigen]), y, groups, args.pca)
 
     out = Path(args.results)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(
-        {"group_col": args.group_col, "pca": args.pca, "antigen": args.antigen, "results": results},
+        {"group_col": args.group_col, "pca": args.pca, "antigen": args.antigen,
+         "metrics": METRICS, "results": results},
         indent=2))
     print(f"\nSaved → {out}")
 
