@@ -1,21 +1,26 @@
-"""Source script: Engelhart et al. 2022 AAYL AlphaSeq anti-VEGF DMS.
+"""Source script: Engelhart et al. 2022 AAYL AlphaSeq anti-SARS-CoV-2 DMS.
 
 Re-processes raw CSV files from DMS_Data/05_engelhart_aayl/.
 Full HC+LC sequences available in each CSV. The binding_score column
-represents -log10(KD/M) estimated by the AlphaSeq phage-display pipeline
+represents -log10(KD/M) estimated by the AlphaSeq pipeline
 (Bayesian enrichment model, not direct SPR/BLI measurement).
 
-Paper: Engelhart et al. (2022) A framework for incorporating binding affinity
-       to design target-specific peptides. Protein Eng Des Sel 35:gzac009.
-       doi:10.1093/protein/gzac009
+Paper: Engelhart E et al. (2022) A dataset comprised of binding interactions
+       for 104,972 antibodies against a SARS-CoV-2 peptide. Sci Data / Protein
+       Eng Des Sel 35:gzac009. doi:10.1093/protein/gzac009
 
 Note on units: binding_score ≈ -log10(KD/M) (pseudo-KD from AlphaSeq).
        kd_nm = 10^(9 - binding_score)
        Method flagged as "phage_display_alphaSeq" to distinguish from direct
        biophysical measurements.
 
-Target antigen: VEGF-A (Vascular Endothelial Growth Factor A)
-       Sequence from PDB 1MHP chain A (192 aa).
+Target antigen: SARS-CoV-2 Spike heptad-repeat-2 (HR2) target peptide
+       PDVDLGDISGINAS (14 aa) — the AlphaSeq target the AAYL antibodies were
+       selected against (confirmed by AbBiBench AAYL49_bca.pdb chain A;
+       "DISGINAS" is the canonical start of Spike HR2).
+       NOTE (QC fix 2026-06-01): earlier versions of this script mislabeled the
+       antigen as VEGF-A and used PDB 1MHP chain A — which is actually the
+       integrin-α1 I-domain, not VEGF. Both the label and the sequence were wrong.
 """
 
 from __future__ import annotations
@@ -31,8 +36,6 @@ from schema import (
     CENSORING_THRESHOLD_NM,
     apply_censoring,
     cast_to_schema,
-    extract_pdb_chain,
-    neg_log_kd_to_nm,
     validate_df,
 )
 
@@ -42,16 +45,18 @@ from schema import (
 
 SOURCE_KEY = "engelhart_2022"
 CITATION = (
-    "Engelhart E et al. (2022) A framework for incorporating binding affinity "
-    "to design target-specific peptides. Protein Eng Des Sel 35:gzac009. "
-    "doi:10.1093/protein/gzac009"
+    "Engelhart E et al. (2022) A dataset comprised of binding interactions for "
+    "104,972 antibodies against a SARS-CoV-2 peptide. "
+    "Protein Eng Des Sel 35:gzac009. doi:10.1093/protein/gzac009"
 )
 METHOD = "phage_display_alphaSeq"
-GROSS_ANTIGEN = "VEGF"
-FINE_ANTIGEN = "VEGF-A"
+GROSS_ANTIGEN = "SARS-CoV-2"
+FINE_ANTIGEN = "SARS-CoV-2-Spike-HR2"
+
+# SARS-CoV-2 Spike HR2 target peptide the AAYL antibodies were raised against.
+SPIKE_HR2_PEPTIDE = "PDVDLGDISGINAS"
 
 RAW_DIR = REPO_ROOT / "DMS_Data" / "05_engelhart_aayl"
-PDB_DIR = REPO_ROOT / "DMS_Data" / "pdbs"
 OUT_FILE = Path(__file__).parent / "engelhart_2022.parquet"
 
 # Files to process (exclude files without binding_score or light chain)
@@ -64,16 +69,11 @@ TARGET_FILES = [
 ]
 
 
-def _vegf_target_seq() -> str:
-    """VEGF-A sequence from PDB 1MHP chain A (192 aa)."""
-    return extract_pdb_chain(PDB_DIR / "1MHP.pdb", "A")
-
-
 def source_engelhart() -> pl.DataFrame:
     """Load, convert, and annotate the Engelhart 2022 AAYL dataset."""
     print(f"\n[{SOURCE_KEY}] Loading from {RAW_DIR}")
-    target_seq = _vegf_target_seq()
-    print(f"  VEGF-A target sequence: {len(target_seq)} aa")
+    target_seq = SPIKE_HR2_PEPTIDE
+    print(f"  SARS-CoV-2 Spike HR2 target peptide: {target_seq} ({len(target_seq)} aa)")
 
     parts: list[pl.DataFrame] = []
     for csv_name in TARGET_FILES:
@@ -135,7 +135,9 @@ def source_engelhart() -> pl.DataFrame:
         raise RuntimeError(f"No data loaded from {RAW_DIR}")
 
     combined = pl.concat(parts)
-    combined = validate_df(combined, source_key=SOURCE_KEY)
+    # min_target=10: the SARS-CoV-2 HR2 target is a 14-aa peptide, below the
+    # default 30-residue floor meant to drop fragment/garbage antigens.
+    combined = validate_df(combined, source_key=SOURCE_KEY, min_target=10)
     combined = cast_to_schema(combined)
     return combined
 

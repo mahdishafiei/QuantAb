@@ -48,6 +48,30 @@ OUT_FILE = Path(__file__).parent / "andd_2026.parquet"
 # Null placeholder used in the Excel file
 _NULL_PLACEHOLDER = "\\"
 
+# Lower KD floor (nM). KDs at/below this are physically implausible for a
+# measured antibody-antigen interaction (≤1 pM) and are data artifacts in ANDD
+# (e.g. kd_nm values down to ~1e-36). Rows with kd_nm <= this are dropped.
+KD_FLOOR_NM = 0.001
+
+# Antigen-name patterns that indicate NOT a true paratope-epitope interaction:
+# antibody Fc / Fc-receptor / FcRn, bacterial Ig-binding proteins (Protein A/L),
+# and Ig proteases. These bind the antibody constant region/framework, not via
+# the CDR loops, so they are excluded from the affinity corpus.
+_FC_RECEPTOR_EXCLUDE = re.compile(
+    r"fcrn"
+    r"|fc region receptor"
+    r"|fc receptor"
+    r"|fc-?gamma receptor"
+    r"|immunoglobulin gamma fc"
+    r"|\bige fc\b"
+    r"|\bigg\d? ?\w* ?fc\b"
+    r"|immunoglobulin heavy constant"
+    r"|g[- ]binding protein a"
+    r"|\bprotein l\b"
+    r"|immunoglobulin a1 protease",
+    re.IGNORECASE,
+)
+
 # ---------------------------------------------------------------------------
 # Gross antigen mapping from Ag_Name keywords
 # ---------------------------------------------------------------------------
@@ -96,7 +120,10 @@ def _parse_kd(val) -> Optional[float]:
         kd_m = float(str(val).replace(",", ".").strip())
         if kd_m <= 0:
             return None
-        return kd_m * 1e9
+        kd_nm = kd_m * 1e9
+        if kd_nm <= KD_FLOOR_NM:  # drop sub-pM artifacts
+            return None
+        return kd_nm
     except (ValueError, TypeError):
         return None
 
@@ -127,6 +154,7 @@ def source_andd() -> pl.DataFrame:
     n_ab = 0
     n_kd = 0
     n_seq = 0
+    n_fc = 0
 
     for row in rows:
         n_total += 1
@@ -157,6 +185,10 @@ def source_andd() -> pl.DataFrame:
         method = str(method_raw).strip() if not _is_null(method_raw) else "unknown"
 
         ag_name = get("Ag_Name")
+        # Drop Fc / Fc-receptor / Ig-binding-reagent "antigens" (not true Ab-Ag)
+        if not _is_null(ag_name) and _FC_RECEPTOR_EXCLUDE.search(str(ag_name)):
+            n_fc += 1
+            continue
         gross, fine = _infer_antigen(ag_name if not _is_null(ag_name) else None)
 
         records.append({
@@ -178,7 +210,8 @@ def source_andd() -> pl.DataFrame:
     wb.close()
     print(
         f"  Rows scanned: {n_total:,} | antibody: {n_ab:,} | "
-        f"has KD: {n_kd:,} | has all seqs: {n_seq:,}"
+        f"has KD (>{KD_FLOOR_NM} nM): {n_kd:,} | has all seqs: {n_seq:,} | "
+        f"Fc/FcR excluded: {n_fc:,}"
     )
 
     if not records:
