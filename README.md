@@ -57,16 +57,31 @@ Spearman ρ  vs.  training set size  →  learning curves
 
 ---
 
-## Datasets
+## Dataset
 
-All experiments use publicly available deep mutational scanning (DMS) datasets with
-continuous binding measurements (KD or enrichment score):
+All models are benchmarked on one merged, normalized table — **`unified_affinity_v2.csv`**
+(**40,937 antibody–antigen pairs, 1,041 antigens**, 0 missing). Each row = an antibody
+(heavy + light) + an antigen sequence + a measured binding affinity. Built by
+`scripts/build_unified_affinity.py`; stored on S3 (not committed).
 
-| Dataset | Antibody | Variants | Measurement |
+| Source | System | Rows | Antigen |
 |---|---|---|---|
-| Phillips et al. 2021 | CR9114 anti-influenza (H1/H3) | ~67,000 | -log(KD) |
-| Engelhart et al. | AAYL antibody variants | ~42,000 | Binding score |
-| Shanehsazzadeh et al. | Trastuzumab (HER2) | 422 | -log(KD) |
+| Phillips et al. 2021 | CR9114 anti-influenza DMS | 33,345 | flu H1-HA |
+| Dailey | CR9114 single-mutants | 4,196 | flu H1/H3-HA |
+| ANDD (SAbDab / PDB / sdAb / INDI / …) | diverse antibodies + nanobodies | 3,310 | 1,000+ antigens |
+| MAGMA-seq | 4A8 / CC12.1 | 86 | SARS-CoV-2 |
+
+- **Label:** `affinity` = pKd (−log10 KD); **`affinity_norm`** = pKd z-scored within each
+  (protocol, antigen) group — the regression target. (Rows pool different assays/scales, so raw KD
+  isn't comparable across them; normalization makes one consistent target.)
+- **Coverage is uneven:** every row has a KD, but ~⅔ of antigens have a single measurement and the
+  top 3 antigens (flu / HER2) are ~93% of rows — deep on flu/CR9114, thin elsewhere.
+- **Not directly usable, so excluded:** PLAbDab (no labels), SARS2 escape (escape ≠ KD), IEDB
+  epitopes (categorical), AB-Bind (ΔΔG), and SAbDab-affinity/SKEMPI/AlphaSeq (no labels / no
+  sequences / no antigen sequence).
+
+Full details: [`data/README.md`](data/README.md) and [`results-classic.md`](results-classic.md).
+S3: `s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity_v2.csv`
 
 ---
 
