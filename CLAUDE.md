@@ -11,12 +11,13 @@ This is a Briney Lab project at The Scripps Research Institute, originating from
 The **classical** arm of the project is fully built, run, and benchmarked end-to-end; the
 two-register quantum arm (below) is the next build. Current state:
 
-- **Unified dataset — `curated_data/unified_affinity_v2.csv`** (40,937 rows, 1,041 antigens, 0
-  missing). Built by `scripts/build_unified_affinity.py` from the curated DMS data + the usable
-  subset of Terrence's ANDD collection; affinities harmonized to **pKd** and z-scored within each
-  (protocol, antigen) group → `affinity_norm` (the regression target). Phillips H3 dropped
-  (degenerate); SAbDab/SKEMPI/AlphaSeq assessed and excluded (no labels / no sequences / no
-  antigen). Size columns + `target_truncated` flag included. On S3 (see Dataset paths).
+- **Unified dataset — `curated_data/unified_affinity_v3.csv`** (114,300 rows, 357 antigens, 0
+  missing, all paired). Built by `scripts/build_corpus_dataset.py` from the team's affinity-sourcing
+  corpus (`affinity_corpus_filtered.parquet`): keep measured methods + sane KD (drop predicted),
+  harmonize to **pKd**, z-score within each **(method, antigen)** group → `affinity_norm` (the
+  regression target). Adds VEGF (Engelhart/AlphaSeq, 42k) on top of the flu DMS. Size columns +
+  `target_truncated` flag. On S3. (`unified_affinity_v2.csv`, 41k rows from the earlier
+  DMS+ANDD build via `build_unified_affinity.py`, is the prior version.)
 - **Embeddings** — `scripts/extract_embeddings.py --unified ... --embed antibody|target`. All three
   models **mean-pooled** (CLS rejected, ISSUE 2); identical sequences de-duplicated before
   embedding (big speedup); `--max-length` (antibody 512, antigen 1024). Antibody = IgBERT / ESM-2 /
