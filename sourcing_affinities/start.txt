@@ -1,0 +1,32 @@
+AbRank — arXiv 2506.17857 => Ok, but needs refinement, as they kept some parts for ranking we're not going to be able to use for pure affinity prediction. Probably best to pull individual datasets and clean them separately
+
+SAbDab (Structural Antibody Database) => Already included (to some extent?) in the AbRank database. I'm not using it
+
+TDC AntibodyAff (Protein_SAbDab) => I pulled that one, but I think it's already in the AbRank dataset, isn't it?
+
+ANDD (Antibody and Nanobody Design Dataset, 2026) => I have that one downloaded and will use. Filtered. 
+
+AlphaSeq SARS-CoV-2 dataset (Engelhart et al. 2022) => already included in AbRank
+
+AbBiBench (2025): curated data not shared. need to collect and curat all individual datasets:
+
+ID,Chains,Chain_lengths,Library_selection,Mutated_regions,Study
+2fjg,"H/L/V","118/107/95","Phage display DMS","both","Koenig et al. (2017)"
+3gbn_h1,"H/L/A,B","121/109/328/173","Germline-reverted (yeast display)","both","Phillips et al. (2021)"
+3gbn_h9,"H/L/A,B","121/109/328/173","Germline-reverted (yeast display)","both","Phillips et al. (2021)"
+4fqi_h1,"H/L/A,B","121/109/324/176","Germline-reverted (yeast display)","both","Phillips et al. (2021)"
+4fqi_h3,"H/L/A,B","121/109/324/176","Germline-reverted (yeast display)","both","Phillips et al. (2021)"
+1mlc,"B/A/E","117/109/129","Yeast display DMS","both","Warszawski et al. (2020)"
+aayl49,"B/C/A","118/113/14","Phage display DMS","CDRs","Engelhart et al. (2022)"
+aayl49_ML,"B/C/A","118/113/14","ML-generated scFv (phage display)","CDRs","Li et al. (2023)"
+aayl51,"B/C/A","119/115/14","Phage display DMS","CDRs","Engelhart et al. (2022)"
+1n8z,"B/A/C","121/109/581","Zero-shot generative AI model","CDRs","Shanehsazzadeh et al. (2023)"
+1mhp,"H/L/A","118/107/184","Mutant library (in-silico biophysics)","both","Clark et al. (2006)"
+5a12_ang2,"H/L/A","215/213/220","Yeast display DMS","CDRs","Minot & Reddy (2024)"
+
+
+SKEMPI 2.0 life.bsc.es/pid/skempi2 => already included in AbRank
+
+CoV-AbDab paired with CoV-UniBind (Jan 2026) => need to be retrieved and parsed (and clustered)
+https://www.biorxiv.org/content/10.1101/2025.07.17.665346v1
+
