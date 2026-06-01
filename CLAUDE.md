@@ -6,6 +6,32 @@ QuantAb explores whether quantum kernel methods — specifically two-register qu
 
 This is a Briney Lab project at The Scripps Research Institute, originating from a hackathon with AWS compute support.
 
+## Project status — what's been done (2026-06-01)
+
+The **classical** arm of the project is fully built, run, and benchmarked end-to-end; the
+two-register quantum arm (below) is the next build. Current state:
+
+- **Unified dataset — `curated_data/unified_affinity_v2.csv`** (40,937 rows, 1,041 antigens, 0
+  missing). Built by `scripts/build_unified_affinity.py` from the curated DMS data + the usable
+  subset of Terrence's ANDD collection; affinities harmonized to **pKd** and z-scored within each
+  (protocol, antigen) group → `affinity_norm` (the regression target). Phillips H3 dropped
+  (degenerate); SAbDab/SKEMPI/AlphaSeq assessed and excluded (no labels / no sequences / no
+  antigen). Size columns + `target_truncated` flag included. On S3 (see Dataset paths).
+- **Embeddings** — `scripts/extract_embeddings.py --unified ... --embed antibody|target`. All three
+  models **mean-pooled** (CLS rejected, ISSUE 2); identical sequences de-duplicated before
+  embedding (big speedup); `--max-length` (antibody 512, antigen 1024). Antibody = IgBERT / ESM-2 /
+  BALM; antigen = ESM-2. Cached in S3 `embeddings/<model>/unified_*`.
+- **Classical regression** — `scripts/run_regression.py`. Raw embeddings → StandardScaler → MLP
+  head; **no PCA on the classical side** (PCA is only for the quantum qubit budget). Scaling fit
+  in-fold (ISSUE 1, no leak). Default eval = **GroupKFold by antigen** (held-out antigens, honest);
+  reports Spearman, Pearson, R², RMSE, Recall@10%.
+- **Results** — IgBERT (antibody-specific) wins on every metric on the honest split; the antigen
+  embedding doesn't help (flu-dominated data). Full write-up in **`results-classic.md`** (also on
+  S3 `results/results-classic.md`); raw scores in S3 `results/regression_grouped.json`.
+- **AWS** — inference runs on EC2 GPUs (g5.12xlarge / g4dn.12xlarge, 4 GPUs, one model per GPU) via
+  a self-contained bootstrap that pulls code+data from S3, embeds, benchmarks, and syncs results
+  back. Profile `mshafiei-scripps`, bucket `scrippsresearch-mshafiei-hackathon`.
+
 ## Embedding architecture (two modalities, two registers)
 
 Each sample produces **two independent embeddings** extracted by two separate models:
@@ -60,7 +86,11 @@ Total qubits = k_ab + k_target. Typical targets: (6,6)=12, (8,8)=16, (10,10)=20,
 
 ## Current implementation status (single-register baseline)
 
-The code currently on this branch implements the **single-register baseline / ablation arm** of the design above: antibody-only embeddings (no target register yet), reduced by PCA, fed to single-register quantum kernels and classical baselines. This is exactly the "single-register on concatenated features" ablation the two-register design is measured against — so it is a useful starting point, not a competing design. Building out the target modality and the two-register circuit is the next step.
+This section lists the model/embedding building blocks. The classical pipeline that uses them is
+summarized in **Project status** above (unified dataset → mean-pooled embeddings → MLP regression,
+no PCA, grouped-by-antigen eval). Both antibody **and** antigen embeddings are produced now; the
+single-register quantum kernels below are the quantum baseline, with the two-register design as the
+next build.
 
 What is implemented today:
 
@@ -84,9 +114,9 @@ What is implemented today:
   All three then use **mean pooling** over residue positions (special tokens excluded).
 
 - **Quantum kernels** (`quantab/quantum_kernels.py`) — `quantum_minimal` (angle encoding + 1 entangling layer) and `quantum_expressive` (repeated Ry+CNOT layers), single-register, `lightning.qubit` simulator. O(N²) kernel matrices — keep ≤500 points.
-- **Classical baselines** (`quantab/classical.py`) — linear/RBF/poly SVM + random forest.
-- **Evaluation** (`quantab/evaluation.py`) — learning curves, k-fold CV, Spearman metric.
-- **Scripts** — `extract_embeddings.py`, `run_experiments.py`, `generate_figures.py` (idempotent, CLI-driven).
+- **Classical predictor** (`quantab/classical.py`) — small **MLP head** (lab-style) as the default, plus an RBF-kernel SVM comparator (linear SVM, random forest also available).
+- **Evaluation** (`quantab/evaluation.py`) — learning curves, k-fold CV, Spearman; in-fold DR (PLSR/PCA) for the quantum arm.
+- **Scripts** (idempotent, CLI-driven) — `build_unified_affinity.py` (build the dataset), `extract_embeddings.py` (embed, `--unified` / `--embed antibody|target` / `--max-length`), `run_regression.py` (classical benchmark, multi-metric, grouped split), `run_experiments.py` / `run_two_register.py` (quantum), `generate_figures.py`.
 
 ## Dataset paths
 
