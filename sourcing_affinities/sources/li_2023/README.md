@@ -1,29 +1,17 @@
 # Li et al. 2023 — ML-generated scFv variants (aayl49_ML)
 
+## Status: ✅ ALREADY IN CORPUS via engelhart_2022 — do not ingest separately
+
+Verified 2026-06-01: the AbBiBench `aayl49_ML_benchmarking_data.csv` (8,953 rows)
+is **100% sequence-overlapping** with our existing `engelhart_2022` source. The
+same holds for `aayl50`/`aayl52`. No separate ingestion is needed; doing so would
+duplicate rows. The `source_li.py` stub is retained for reference only.
+
 ## Citation
 Li et al. (2023) Machine learning optimization of candidate antibody yields
-high-affinity anti-VEGF antibodies. *Cell Reports Methods* [check full citation].
+high-affinity anti-SARS-CoV-2 antibodies. *Cell Reports Methods*.
 
-## Description
-ML-generated scFv variants based on the aayl49 scaffold (anti-VEGF-A, same
-template as Engelhart 2022). Variants tested by phage display enrichment.
-AbBiBench ID: aayl49_ML. PDB: none (same antigen as Engelhart aayl49).
-
-## Download Instructions
-
-1. Check the paper supplement for the ML variant dataset.
-2. May be available on the Engelhart Lab GitHub or paper Zenodo.
-3. Search: "aayl49_ML_benchmarking_data.csv" — this file may already be present
-   in DMS_Data/05_engelhart_aayl/ (check before downloading separately).
-
-```bash
-ls ../../../../DMS_Data/05_engelhart_aayl/aayl49_ML_benchmarking_data.csv
-```
-
-If present, this source can share the `source_engelhart.py` loader (it already
-processes aayl49_ML files if they follow the same schema). In that case, this
-stub is not needed as a separate source.
-
-## Status
-⚠️  Check if already processed by engelhart_2022 source script. If not,
-place raw data in `raw/` and implement `source_li.py`.
+## Note on antigen
+The AAYL49/50/51/52 lineages (Engelhart 2022 AlphaSeq) bind **SARS-CoV-2 Spike**,
+not VEGF as an earlier draft stated. (Our `engelhart_2022` rows are currently
+mislabeled `gross_antigen=VEGF-A` — flagged for a separate QC pass.)

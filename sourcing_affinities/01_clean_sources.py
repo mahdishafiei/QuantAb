@@ -26,7 +26,12 @@ sys.path.insert(0, str(SOURCING_DIR))
 
 from schema import CENSORING_THRESHOLD_NM, apply_censoring, cast_to_schema, validate_df  # noqa: E402
 
-# Sources in the order to process (stubs will be skipped gracefully)
+# Sources in the order to process (stubs will be skipped gracefully).
+# Note: the AbBiBench source (abbibench.parquet) supplies the clark_2006,
+# koenig_2017, warszawski_2020 and minot_2024 systems plus two HER2 sets — so
+# those per-paper stub dirs are no longer ingested standalone. li_2023
+# (aayl49_ML) is fully contained in engelhart_2022. cov_abdab_unibind remains a
+# genuine TODO and will report MISSING until its raw data is collected.
 SOURCE_SCRIPTS: list[tuple[str, str]] = [
     ("phillips_2021",       "sources/phillips_2021/source_phillips.py"),
     ("engelhart_2022",      "sources/engelhart_2022/source_engelhart.py"),
@@ -34,11 +39,7 @@ SOURCE_SCRIPTS: list[tuple[str, str]] = [
     ("andd_2026",           "sources/andd_2026/source_andd.py"),
     ("dailey_2021",         "sources/dailey_2021/source_dailey.py"),
     ("magma_seq_2022",      "sources/magma_seq_2022/source_magma_seq.py"),
-    ("koenig_2017",         "sources/koenig_2017/source_koenig.py"),
-    ("warszawski_2020",     "sources/warszawski_2020/source_warszawski.py"),
-    ("clark_2006",          "sources/clark_2006/source_clark.py"),
-    ("li_2023",             "sources/li_2023/source_li.py"),
-    ("minot_2024",          "sources/minot_2024/source_minot.py"),
+    ("abbibench",           "sources/abbibench/source_abbibench.py"),
     ("cov_abdab_unibind",   "sources/cov_abdab_unibind/source_cov_abdab.py"),
 ]
 
