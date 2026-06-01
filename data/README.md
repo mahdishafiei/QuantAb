@@ -12,6 +12,10 @@ s3://scrippsresearch-mshafiei-hackathon/
 │   ├── unified_affinity.csv     prior version (kept; no size columns)
 │   ├── filtered_data.csv        DMS binding data (Phillips/Dailey/MAGMA-seq)
 │   └── ANDD_dataset.xlsx        Terrence's unified Ab/Nb–antigen affinity collection
+├── affinity_corpus/             diverse Ab–Ag affinity corpus + identity clustering (2026-06-01)
+│   ├── affinity_corpus.parquet           117,486 rows (censored included), full schema
+│   ├── affinity_corpus_filtered.parquet  114,652 rows (non-censored only)
+│   └── cluster_assignments.parquet       per-row Ab/Ag/joint identity clusters + weights
 ├── DMS_Data/                    raw deep-mutational-scanning sources
 └── embeddings/                  cached model embeddings (one subdir per model)
 ```
@@ -80,6 +84,39 @@ python scripts/build_unified_affinity.py \
 from pathlib import Path
 from quantab.data import load_unified
 df = load_unified(Path("curated_data/unified_affinity_v2.csv"))
+```
+
+## The diverse affinity corpus (`affinity_corpus/`) — next-gen training data
+
+Built by the `sourcing_affinities/` pipeline (`01_clean_sources.py` → `02_aggregate.py` →
+`03_cluster.py`), a from-scratch re-curation that supersedes the DMS-only `unified_affinity`
+set with a more diverse, multi-source corpus. **Pushed to S3 2026-06-01; pending embedding
+extraction by Mahdi.**
+
+| File | Rows | Notes |
+|---|---|---|
+| `affinity_corpus.parquet` | 117,486 | full schema; includes censored rows (`is_censored=True` for KD > 1 µM) |
+| `affinity_corpus_filtered.parquet` | 114,652 | non-censored only |
+| `cluster_assignments.parquet` | 117,486 | identity-cluster labels + weights, joinable on `hc_seq`/`lc_seq`/`target_seq` |
+
+**Corpus schema** (`affinity_corpus.parquet`): `hc_seq`, `lc_seq`, `target_seq`, `kd_nm`,
+`kd_sd_nm`, `source_key`, `source_citation`, `method`, `gross_antigen`, `fine_antigen`,
+`is_censored`, `censor_type`, `notes`, plus `affinity = -log10(kd_nm * 1e-9)`.
+
+**Sources:** phillips_2021 (67,033, Flu), engelhart_2022 (42,382, VEGF-A), dailey_2021 (4,974,
+Flu), andd_2026 (4,302, diverse), shanehsazzadeh_2023 (422, HER2), magma_seq_2022 (153, SARS-CoV-2 RBD).
+
+**Clustering** (`cluster_assignments.parquet`, 38 cols) — for leakage-free held-out splits:
+- Antibody (heavy chain): `hc_cluster_{40,70,90,95,97}` + matching `hc_weight_*`
+- Antigen: `ag_cluster_{80,95}` + `ag_weight_*`
+- Joint Ab×Ag: `joint_ab{40,70,90,95,97}_ag{80,95}` + `joint_weight_*` (inverse-cluster-size weights)
+
+All threshold columns are retained — the primary split for GroupKFold/embedding is **TBD** (decide
+once embeddings exist).
+
+```bash
+aws s3 cp s3://scrippsresearch-mshafiei-hackathon/affinity_corpus/affinity_corpus_filtered.parquet \
+  sourcing_affinities/outputs/ --profile <profile> --region us-west-2
 ```
 
 ## Source provenance

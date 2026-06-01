@@ -63,9 +63,14 @@ def dedup_cross_source(df: pl.DataFrame) -> pl.DataFrame:
         .agg(pl.len().alias("n_sources_confirmed"))
     )
 
-    # Rank by kd_nm within each (hc_seq, lc_seq, target_seq) group
+    # Within each (hc_seq, lc_seq, target_seq) group, keep the best measurement:
+    # lowest kd_nm for KD assays, else highest binding_score (higher = stronger).
     df_ranked = (
-        df.sort("kd_nm", nulls_last=True)
+        df.sort(
+            ["kd_nm", "binding_score"],
+            descending=[False, True],
+            nulls_last=True,
+        )
         .with_columns(
             pl.int_range(pl.len()).over(key).alias("_rank")
         )
@@ -78,10 +83,20 @@ def dedup_cross_source(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def compute_affinity(df: pl.DataFrame) -> pl.DataFrame:
-    """Add affinity = -log10(KD/M) column for downstream compatibility."""
-    return df.with_columns(
+    """Add affinity = -log10(KD/M); backfill binding_score and measure_type.
+
+    - ``affinity`` is the absolute pKD; null wherever kd_nm is null (non-KD assays).
+    - ``measure_type`` defaults to "kd" for legacy sources that predate the field.
+    - ``binding_score`` (monotonic, higher = stronger) is backfilled from affinity
+      for KD rows so every row carries a rank-usable score.
+    """
+    df = df.with_columns(
         (-pl.col("kd_nm").log(10) + 9.0).alias("affinity")
     )
+    return df.with_columns([
+        pl.col("measure_type").fill_null("kd"),
+        pl.coalesce(["binding_score", "affinity"]).alias("binding_score"),
+    ])
 
 
 def main() -> None:

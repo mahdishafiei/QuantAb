@@ -11,3 +11,6 @@ __pycache__/
 dist/
 build/
 .env
+
+# AbBiBench / per-source raw download caches (reproducible from source scripts)
+sourcing_affinities/sources/*/raw/

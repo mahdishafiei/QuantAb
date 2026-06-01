@@ -20,8 +20,14 @@ SCHEMA: dict[str, pl.DataType] = {
     "lc_seq":          pl.Utf8,
     "target_seq":      pl.Utf8,
     # Affinity
-    "kd_nm":           pl.Float64,   # KD in nM (positive float)
+    "kd_nm":           pl.Float64,   # KD in nM (positive float); null for non-KD assays
     "kd_sd_nm":        pl.Float64,   # SD/error in nM (null if unavailable)
+    # Binding signal — monotonic "higher = stronger" score present for EVERY row.
+    # For measure_type=="kd" this equals -log10(KD/M) (pKD). For other assays it
+    # holds the native standardized score (e.g. log enrichment). Use this for
+    # within-dataset rank/Spearman; use kd_nm/affinity only for absolute-KD work.
+    "binding_score":   pl.Float64,
+    "measure_type":    pl.Utf8,      # "kd" | "log_enrichment" | ...
     # Provenance
     "source_key":      pl.Utf8,      # Short key e.g. "phillips_2021"
     "source_citation": pl.Utf8,      # Full citation string
@@ -85,13 +91,20 @@ def validate_df(
 
     Steps:
       1. Clean sequences (uppercase, strip non-AA)
-      2. Drop rows missing hc_seq / lc_seq / target_seq / kd_nm
-      3. Drop rows with sequence lengths outside allowed ranges
-      4. Drop rows with kd_nm <= 0
+      2. Drop rows missing hc_seq / lc_seq / target_seq
+      3. Drop rows lacking a binding measure (need kd_nm > 0 OR binding_score)
+      4. Drop rows with sequence lengths outside allowed ranges
+
+    A row is kept if it carries either a positive kd_nm (absolute-KD assays) or a
+    non-null binding_score (e.g. log-enrichment assays with no calibrated KD).
 
     Prints a summary of rows dropped at each step.
     """
     n_in = len(df)
+
+    # Guarantee binding_score exists so the measure check below is well-defined
+    if "binding_score" not in df.columns:
+        df = df.with_columns(pl.lit(None).cast(pl.Float64).alias("binding_score"))
 
     # Clean sequences
     df = df.with_columns([
@@ -100,7 +113,7 @@ def validate_df(
         pl.col("target_seq").map_elements(clean_seq, return_dtype=pl.Utf8),
     ])
 
-    # Drop missing required fields
+    # Drop missing required fields (sequences + at least one binding measure)
     df = df.filter(
         pl.col("hc_seq").is_not_null()
         & (pl.col("hc_seq").str.len_chars() > 0)
@@ -108,8 +121,8 @@ def validate_df(
         & (pl.col("lc_seq").str.len_chars() > 0)
         & pl.col("target_seq").is_not_null()
         & (pl.col("target_seq").str.len_chars() > 0)
-        & pl.col("kd_nm").is_not_null()
-        & (pl.col("kd_nm") > 0)
+        & (((pl.col("kd_nm").is_not_null()) & (pl.col("kd_nm") > 0))
+           | pl.col("binding_score").is_not_null())
     )
     n_nonnull = len(df)
 
@@ -145,20 +158,51 @@ def cast_to_schema(df: pl.DataFrame) -> pl.DataFrame:
 # PDB sequence extraction utility
 # ---------------------------------------------------------------------------
 
+_AA3TO1 = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
+    "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
+    "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
+    "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
+}
+
+
 def extract_pdb_chain(pdb_path: Path, chain_id: str) -> str:
-    """Extract amino acid sequence from SEQRES records for a given chain."""
-    aa_map = {
-        "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
-        "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
-        "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
-        "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
-    }
+    """Extract amino acid sequence from SEQRES records for a given chain.
+
+    Falls back to :func:`extract_pdb_chain_atoms` when the file has no SEQRES
+    records (common in processed/predicted complex PDBs that carry only ATOM
+    coordinates).
+    """
     residues: list[str] = []
     with open(pdb_path) as fh:
         for line in fh:
             if line.startswith("SEQRES") and line[11] == chain_id:
                 residues.extend(line[19:].split())
-    return "".join(aa_map.get(r, "X") for r in residues)
+    if not residues:
+        return extract_pdb_chain_atoms(pdb_path, chain_id)
+    return "".join(_AA3TO1.get(r, "X") for r in residues)
+
+
+def extract_pdb_chain_atoms(pdb_path: Path, chain_id: str) -> str:
+    """Extract a chain's sequence from ATOM records (one residue per CA atom).
+
+    Residues are read in file order, deduplicated by (resSeq, insertion code)
+    keeping the first conformer. Use for PDBs lacking SEQRES records.
+    """
+    seq: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    with open(pdb_path) as fh:
+        for line in fh:
+            if not line.startswith("ATOM"):
+                continue
+            if line[21] != chain_id or line[12:16].strip() != "CA":
+                continue
+            res_key = (line[22:26].strip(), line[26])  # resSeq + iCode
+            if res_key in seen:
+                continue
+            seen.add(res_key)
+            seq.append(_AA3TO1.get(line[17:20].strip(), "X"))
+    return "".join(seq)
 
 
 # ---------------------------------------------------------------------------
