@@ -74,7 +74,14 @@ What is implemented today:
   | `esm2_650M` | `facebook/esm2_t33_650M_UR50D` | General protein | 1280 | Raw sequence | Mean |
   | `balm_paired` | `brineylab/BALM-paired` | Natively-paired antibody | 1024 | (heavy, light) pair | Mean |
 
-  Note: `balm_paired` takes heavy and light as two separate sequences (RoBERTa two-sequence input), not concatenated. (Caveat: `scripts/extract_embeddings.py` currently concatenates for all models — fix before running BALM through the script; the library `embed_and_reduce` path already handles pairing correctly.)
+  **How heavy + light chains are fed** (verified by decoding the tokenized input):
+  - `igbert` — VH and VL are **concatenated into one sequence, no separator** between chains:
+    `[CLS] <VH residues><VL residues> [SEP]`.
+  - `esm2_650M` — same: VH+VL concatenated, no separator: `<cls> <VH><VL> <eos>`.
+  - `balm_paired` — **native paired input** (RoBERTa two-sequence): `<s> VH </s></s> VL </s>` — the
+    `</s></s>` marks the chain boundary. (The earlier concat bug for paired models is fixed.)
+
+  All three then use **mean pooling** over residue positions (special tokens excluded).
 
 - **Quantum kernels** (`quantab/quantum_kernels.py`) — `quantum_minimal` (angle encoding + 1 entangling layer) and `quantum_expressive` (repeated Ry+CNOT layers), single-register, `lightning.qubit` simulator. O(N²) kernel matrices — keep ≤500 points.
 - **Classical baselines** (`quantab/classical.py`) — linear/RBF/poly SVM + random forest.

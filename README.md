@@ -89,7 +89,12 @@ whole antigens** (each model is scored on antigens it never saw in training).
 
 **IgBERT (antibody-specific) is best on every metric**, and the only model with positive R².
 Adding the antigen embedding doesn't help (data is mostly influenza). A plain random split gives
-ρ ≈ 0.9 for all models, but that overstates real performance — see [RESULTS.md](RESULTS.md).
+ρ ≈ 0.9 for all models, but that overstates real performance.
+
+**Inputs:** IgBERT and ESM-2 take VH+VL concatenated (no separator); BALM-paired takes them as a
+native pair (`<s> VH </s></s> VL </s>`). All three are mean-pooled over residues.
+
+Full dataset, model-input, and method details: **[results-classic.md](results-classic.md)**.
 
 ---
 
