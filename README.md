@@ -72,24 +72,17 @@ continuous binding measurements (KD or enrichment score):
 
 ## Results
 
-Regression of binding affinity from each model's **mean-pooled** embeddings on the unified
-dataset (`unified_affinity_v2.csv`, 40,937 rows, 1,041 antigens). Full details and method
-notes in [RESULTS.md](RESULTS.md).
+Binding-affinity regression from each model's mean-pooled embeddings on
+`unified_affinity_v2.csv` (40,937 rows, 1,041 antigens).
 
-<p align="center">
-  <img src="figures/regression_benchmark.png" alt="Affinity prediction benchmark" width="640">
-</p>
+| Model | Spearman ρ |
+|---|---|
+| IgBERT | **0.48** |
+| ESM-2 650M | 0.45 |
+| BALM-paired | 0.42 |
 
-| Model (mean-pool) | Random CV | **Grouped-by-antigen CV (honest)** |
-|---|---|---|
-| IgBERT | 0.899 ± 0.003 | **0.482 ± 0.130** |
-| ESM-2 650M | **0.907 ± 0.002** | 0.445 ± 0.182 |
-| BALM-paired | 0.885 ± 0.005 | 0.420 ± 0.106 |
-
-**Takeaway:** random CV looks strong (~0.9) but is inflated by sequence-similarity leakage
-(CR9114 single-mutants split across train/test). Holding out **whole antigens** gives the
-honest estimate, **ρ ≈ 0.42–0.48** — where IgBERT leads. Adding the antigen embedding does not
-help on this flu-dominated set. *(Spearman ρ; scaling fit in-fold; no PCA leakage.)*
+Spearman correlation between predicted and measured affinity (5-fold cross-validation, held-out
+antigens). Details in [RESULTS.md](RESULTS.md).
 
 ---
 
