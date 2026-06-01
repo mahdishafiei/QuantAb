@@ -59,11 +59,19 @@ def run_source_script(source_key: str, script_path: Path) -> bool:
 
 
 def load_and_validate_parquet(parquet_path: Path, source_key: str) -> pl.DataFrame | None:
-    """Load a source parquet, re-run validation, and return the cleaned frame."""
+    """Load a source parquet and re-run a lenient validation for the report.
+
+    Each source_*.py script already applied its own (possibly source-specific)
+    validation when it wrote the parquet — e.g. engelhart legitimately has a
+    14-aa peptide antigen. So we re-check with a permissive min_target here only
+    to surface obvious breakage, never to re-impose the strict default 30-aa
+    floor (which would wrongly drop valid short antigens). This function is
+    read-only: it does NOT write the parquet back.
+    """
     if not parquet_path.exists():
         return None
     df = pl.read_parquet(parquet_path)
-    df = validate_df(df, source_key=source_key)
+    df = validate_df(df, source_key=source_key, min_target=10)
     df = cast_to_schema(df)
     return df
 
@@ -110,9 +118,6 @@ def main() -> None:
             "n_censored": n_censored,
         })
         all_dfs.append(df)
-
-        # Write back the validated parquet
-        df.write_parquet(parquet_path)
 
     # Summary table
     print("\n" + "="*70)
