@@ -88,7 +88,7 @@ _GROSS_RULES: list[tuple[str, str, str]] = [
     (r"IL-1\b|interleukin.1\b", "IL-1", "IL-1"),
     (r"EGFR|epidermal growth factor receptor", "EGFR", "EGFR-ECD"),
     (r"RSV|respiratory syncytial", "RSV", "RSV-F"),
-    (r"lysozyme", "lysozyme", "lysozyme"),
+    (r"lysozyme", "Lysozyme", "Lysozyme"),
     (r"insulin", "insulin", "insulin"),
     (r"PD.?1|programmed death", "PD-1", "PD-1"),
     (r"PD.?L1", "PD-L1", "PD-L1"),
