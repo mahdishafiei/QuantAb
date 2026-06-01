@@ -1,52 +1,39 @@
-# CoV-AbDab + CoV-UniBind — SARS-CoV-2 Antibodies with Quantitative KD
+# CoV-UniBind — SARS-CoV-2 antibody SPR affinities
+
+## Status: ✅ INGESTED (839 SPR KD rows)
+
+Implemented from **CoV-UniBind** alone. CoV-AbDab is **not** used: CoV-UniBind's
+SPR table is self-contained (paired VH/VL + antigen sequence + KD per row), and
+CoV-AbDab only carries qualitative binding labels.
 
 ## Citations
-- CoV-AbDab: Raybould MIJ et al. (2021) CoV-AbDab: the coronavirus antibody
-  database. Bioinformatics 37(5):734-735. doi:10.1093/bioinformatics/btaa739
+- CoV-UniBind: Bhasin S et al. (2025) CoV-UniBind: A Unified Antibody Binding
+  Database for SARS-CoV-2. bioRxiv 2025.07.17.665346; Bioinformatics Advances
+  doi:10.1093/bioadv/vbaf328.
+- Antibody sequences originate from CoV-AbDab (Raybould MIJ et al. 2021,
+  Bioinformatics 37(5):734-735, doi:10.1093/bioinformatics/btaa739).
 
-- CoV-UniBind: [bioRxiv 2025.07.17.665346v1] — Quantitative binding database
-  pairing CoV-AbDab antibody sequences with measured KD values.
-  doi:10.1101/2025.07.17.665346
-
-## Description
-CoV-AbDab provides paired HC+LC sequences for SARS-CoV-2 antibodies with
-known neutralization and structural data. CoV-UniBind extends this with
-quantitative KD values (SPR/BLI) from the literature. Together they provide
-the most comprehensive paired-sequence + affinity data for COVID-19 antibodies.
-
-## Download Instructions
-
-### 1. CoV-AbDab sequences
+## Data download
 ```bash
-# Download the full CoV-AbDab CSV (updated monthly)
-wget "https://opig.stats.ox.ac.uk/webapps/covabdab/static/downloads/CoV-AbDab_260524.csv" \
-  -O raw/CoV-AbDab.csv
-# Or use the latest download link from: https://opig.stats.ox.ac.uk/webapps/covabdab/
+curl -sL https://huggingface.co/datasets/InstaDeepAI/cov-unibind/resolve/main/data/spr_ab_affinity.parquet \
+  -o raw/spr_ab_affinity.parquet
 ```
+(`raw/` is gitignored.) CoV-UniBind lives at
+https://huggingface.co/datasets/InstaDeepAI/cov-unibind
 
-### 2. CoV-UniBind KD data
-```bash
-# From the bioRxiv preprint supplementary material
-# doi: 10.1101/2025.07.17.665346
-# Download the quantitative binding affinity table from the paper supplement
-# Place as raw/CoV-UniBind_KD.csv (or .xlsx)
-```
+## What we ingest
+Only `spr_ab_affinity.parquet` (839 rows) — the quantitative equilibrium-KD
+slice. CoV-UniBind's other tables are skipped on purpose:
+- `drdb_binding_potency` (neutralization IC50), `jian_elisa_ab_ic50` (ELISA
+  IC50) — IC50 is not equilibrium binding affinity.
+- `dms_*_escape` — DMS escape scores, a different axis.
 
-## Expected columns from CoV-AbDab
-`Ab or Nb`, `Heavy Variable Sequence`, `Light Variable Sequence`,
-`Protein + Epitope`, `Neutralising Vs`, `PDB`, ...
-
-## Expected columns from CoV-UniBind
-Antibody ID (to join with CoV-AbDab), antigen/strain info, KD (nM),
-measurement method (SPR/BLI), publication reference.
-
-## Notes
-- KD values vs IC50/EC50: CoV-UniBind should provide KD specifically.
-  Ignore neutralization IC50 values — these are not binding affinities.
-- Many antibodies bind RBD; some bind NTD, S2, or other spike regions.
-  Capture fine_antigen (RBD | NTD | S2 | spike-full) carefully.
-- Both SARS-CoV-2 and SARS-CoV-1 antibodies may be present — track species.
-- Clustering is critical: many antibodies from convergent clones.
-
-## Status
-❌ Not yet downloaded. Run `source_cov_abdab.py` after placing raw data in `raw/`.
+## Mapping to schema
+- `hc_seq` / `lc_seq` ← `antibody_vh_sequence` / `antibody_vl_sequence` (variable
+  domains; full Fab chains reach 255 aa and trip the 250-aa ceiling).
+- `target_seq` ← `antigen_sequence` (variant-specific RBD or spike ectodomain;
+  375 unique sequences across 73+ lineages — captures Omicron/Delta/etc.).
+- `kd_nm` ← `10 ** target_value` (target_type is `log10_kd` with KD in nM;
+  range ~0.001 nM .. 20 µM, median ~135 nM). `measure_type="kd"`.
+- `fine_antigen` ← `SARS-CoV-2-RBD` (514) or `SARS-CoV-2-Spike` (325).
+- method = SPR. 296/839 are weak binders (KD > 1 µM) → flagged is_censored.
