@@ -1,9 +1,9 @@
 """Regression benchmark on the model embeddings — leak-free.
 
 Predicts normalized binding affinity (``affinity_norm``) from each model's mean-pooled
-embeddings and reports Spearman ρ. Honors the two correctness rules in MEMORY.md:
+embeddings and reports Spearman ρ. Guards against two kinds of leakage:
 
-- ISSUE 1 (PCA leakage): any PCA / scaling lives inside an sklearn Pipeline, so it is
+- PCA / scaling leakage: any PCA / scaling lives inside an sklearn Pipeline, so it is
   re-fit on the training split of every CV fold (never on the held-out fold).
 - Sequence-similarity leakage: use ``--group-col`` (default ``antigen``) with GroupKFold so
   whole antigens / groups are held out, instead of splitting near-identical DMS single-mutants

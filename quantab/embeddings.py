@@ -49,7 +49,7 @@ REGISTRY: dict[str, ModelConfig] = {
         hf_name="Exscientia/IgBert",
         hidden_dim=1024,
         space_sep=True,
-        pool="mean",   # MEMORY.md ISSUE 2: residue-mean, not CLS (IgBERT's pooler is untrained)
+        pool="mean",   # residue-mean, not CLS (IgBERT's pooler is untrained)
         paired=False,
     ),
     "esm2_35M": ModelConfig(
@@ -77,7 +77,7 @@ REGISTRY: dict[str, ModelConfig] = {
         hf_name="brineylab/BALM-paired",
         hidden_dim=1024,
         space_sep=False,
-        pool="mean",   # MEMORY.md ISSUE 2: residue-mean over VH+VL, not CLS
+        pool="mean",   # residue-mean over VH+VL, not CLS
         paired=True,   # passes heavy and light as two sequences to the tokenizer
     ),
 }
@@ -110,7 +110,7 @@ def _pool(hidden: torch.Tensor, pool_mask: torch.Tensor, strategy: str) -> np.nd
 
     strategy="mean": average over real residue positions only (``pool_mask`` already
       excludes padding AND special tokens — CLS/SEP/EOS). This is the project default;
-      every position (including HCDR3) contributes. See MEMORY.md ISSUE 2.
+      every position (including HCDR3) contributes.
     strategy="cls": the first token only — kept for ablation, NOT recommended (the CLS
       token is not trained to summarize binding for these MLM models).
     """

@@ -18,6 +18,10 @@ antibody model [BALM-paired](https://huggingface.co/brineylab/BALM-paired) (Burb
 2024) — then compressed to low dimensions via PCA, and evaluated using quantum kernel methods
 versus classical baselines across a range of training set sizes (learning curves).
 
+> This project started at a Scripps Research hackathon and is being developed with the
+> [Briney Lab](https://github.com/brineylab). This repository is my personal copy of the code.
+> The full datasets and embeddings are not included; see [`data/README.md`](data/README.md).
+
 ---
 
 ## Research question
@@ -205,9 +209,7 @@ QuantAb/
 ├── figures/               # Generated figures (committed)
 ├── requirements.txt
 ├── pyproject.toml
-├── PLAN.md                # Full experimental design
-├── CLAUDE.md              # Claude Code collaboration guide
-└── MEMORY.md              # Design decisions and discussion log
+└── PLAN.md                # Full experimental design
 ```
 
 ---
