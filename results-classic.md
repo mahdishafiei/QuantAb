@@ -13,7 +13,7 @@ is just a threshold on that. We use it to **benchmark the three language models*
 extractors.
 
 ## 2. Dataset — `unified_affinity_v3.csv`
-`s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity_v3.csv` — **114,300 rows,
+`s3://<your-bucket>/curated_data/unified_affinity_v3.csv` — **114,300 rows,
 0 missing, all paired**. Each row = one antibody–antigen pair with a measured affinity. Built from
 the team's affinity-sourcing corpus, cleaned + normalized (`scripts/build_corpus_dataset.py`).
 
@@ -96,6 +96,6 @@ python scripts/build_corpus_dataset.py    # corpus -> unified_affinity_v3.csv (c
 python scripts/extract_embeddings.py --unified curated_data/unified_affinity_v3.csv --model all --embed antibody
 python scripts/run_regression.py    --unified curated_data/unified_affinity_v3.csv --model all --group-col antigen
 ```
-- Dataset: `s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity_v3.csv`
-- Embeddings: `s3://scrippsresearch-mshafiei-hackathon/embeddings/{igbert,esm2_650M,balm_paired}/`
-- Scores: `s3://scrippsresearch-mshafiei-hackathon/results/regression_grouped.json`
+- Dataset: `s3://<your-bucket>/curated_data/unified_affinity_v3.csv`
+- Embeddings: `s3://<your-bucket>/embeddings/{igbert,esm2_650M,balm_paired}/`
+- Scores: `s3://<your-bucket>/results/regression_grouped.json`

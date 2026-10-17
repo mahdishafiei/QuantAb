@@ -3,10 +3,10 @@
 Datasets are **not committed to git** (CSVs/PDBs/XLSX are too large). They live in S3 and
 the code reads them from a local path. This file documents what we have and how to get it.
 
-## Source of truth — S3 (hackathon account `127696279288`, region `us-west-2`)
+## Source of truth — S3 (team bucket in the hackathon AWS account, region `us-west-2`)
 
 ```
-s3://scrippsresearch-mshafiei-hackathon/
+s3://<your-bucket>/
 ├── curated_data/
 │   ├── unified_affinity_v3.csv  ← USE THIS: 114,300 rows, built from the affinity corpus, normalized
 │   ├── unified_affinity_v2.csv  prior version (41k rows, DMS + ANDD build)
@@ -32,7 +32,7 @@ Read access is granted to everyone in the hackathon account, so teammates pull w
 own SSO profile — no shared credentials.
 
 ```bash
-aws s3 cp s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity_v3.csv \
+aws s3 cp s3://<your-bucket>/curated_data/unified_affinity_v3.csv \
   curated_data/ --profile <profile> --region us-west-2
 ```
 
@@ -111,7 +111,7 @@ All threshold columns are retained — the primary split for GroupKFold/embeddin
 once embeddings exist).
 
 ```bash
-aws s3 cp s3://scrippsresearch-mshafiei-hackathon/affinity_corpus/affinity_corpus_filtered.parquet \
+aws s3 cp s3://<your-bucket>/affinity_corpus/affinity_corpus_filtered.parquet \
   sourcing_affinities/outputs/ --profile <profile> --region us-west-2
 ```
 
@@ -121,7 +121,7 @@ aws s3 cp s3://scrippsresearch-mshafiei-hackathon/affinity_corpus/affinity_corpu
 | Phillips 2021 | CR9114/CR6261 anti-influenza DMS (Tite-seq), *eLife* |
 | Dailey | CR9114 single-mutant KD tables |
 | MAGMA-seq | 4A8 / CC12.1 vs SARS-CoV-2 RBD (yeast display) |
-| ANDD | Terrence's merge of SAbDab, sdAb-DB, abYbank, PDB, PLAbDab-nano, INDI, … (literature/SPR Kd) |
+| ANDD | Terrence's merge of SAbDab, sdAb-DB, abYbank, PDB, PLAbDab-nano, INDI, … (literature/SPR Kd). Not public: its rows are excluded from the committed `sourcing_affinities/` parquets. |
 
 All datasets derive from published studies and retain their original licenses. The S3 bucket
 is a convenience mirror for the hackathon, not a re-publication.

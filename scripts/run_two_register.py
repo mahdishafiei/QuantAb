@@ -70,8 +70,8 @@ def load_raw(emb_dir: Path, model_key: str) -> np.ndarray:
         raise FileNotFoundError(
             f"Raw embeddings not found: {p}\n"
             "Run scripts/extract_embeddings.py first, or sync from S3:\n"
-            "  aws s3 sync s3://scrippsresearch-mshafiei-hackathon/embeddings/ embeddings/ "
-            "--profile bnemoz-scripps --region us-west-2"
+            "  aws s3 sync s3://<your-bucket>/embeddings/ embeddings/ "
+            "--profile <your-profile> --region us-west-2"
         )
     return np.load(p)
 

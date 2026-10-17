@@ -17,7 +17,7 @@ Which DMS dataset to use for the hackathon? Requirements:
 - Mason et al. — SARS-CoV-2 RBD DMS datasets
 - Starr et al. — SARS-CoV-2 RBD deep scanning
 
-**Status:** Loaders are now implemented in `quantab/data.py` for Phillips CR9114 (~67k, paired, continuous -log KD — strongest candidate), Engelhart AAYL (binding score), and Shanehsazzadeh trastuzumab (422, HCDR3 + KD). Dailey/MAGMA-seq/Adams deferred (single-point or complex multi-file formats). All datasets are mirrored to `s3://scrippsresearch-mshafiei-hackathon/DMS_Data/`.
+**Status:** Loaders are now implemented in `quantab/data.py` for Phillips CR9114 (~67k, paired, continuous -log KD — strongest candidate), Engelhart AAYL (binding score), and Shanehsazzadeh trastuzumab (422, HCDR3 + KD). Dailey/MAGMA-seq/Adams deferred (single-point or complex multi-file formats). All datasets are mirrored to `s3://<your-bucket>/DMS_Data/`.
 
 **Action:** Confirm which one is primary for the hackathon run. Phillips is the cleanest large paired set.
 
@@ -96,7 +96,7 @@ Should we simulate quantum noise (shot noise, gate errors, decoherence) or use i
 
 ### AWS compute allocation
 
-**Instance launched 2026-05-29:** `i-038ef1f119518297a`, `c5.4xlarge`, private IP `172.31.66.186`, 100 GB EBS at `/data`. See CLAUDE.md for SSH instructions.
+**Instance launched 2026-05-29:** `c5.4xlarge`, 100 GB EBS at `/data`. See CLAUDE.md for SSH instructions.
 
 GPU quota for G/VT instances is currently 0 on the hackathon account — organizers need to request an increase. When approved, relaunch as `g4dn.xlarge` (T4 GPU) and switch PennyLane device to `lightning.gpu` for faster kernel matrix computation.
 
@@ -194,7 +194,7 @@ resolution without requiring pooling.
 | Key ablation | Single-register on concatenated features | Isolates benefit of tensor product structure from quantum kernel benefit generally |
 | Classical baselines | RBF-SVR + Linear SVR + Random Forest + MLP | Kernel zoo + non-kernel reference; RBF-SVR is direct apples-to-apples vs quantum kernel |
 | Classical ceiling | **CNN + BiLSTM on per-position IgBERT embeddings** | Learned aggregation bypasses pooling; expected to outperform fixed-pool methods |
-| Data storage | S3 mirror, not committed to git | DMS data ~162 MB; `s3://scrippsresearch-mshafiei-hackathon/`, see `data/README.md` |
+| Data storage | S3 mirror, not committed to git | DMS data ~162 MB; team S3 bucket, see `data/README.md` |
 | Approach to results | Benchmark, not advocacy | We report what we find. Negative results are valuable. |
 
 ---
@@ -217,8 +217,8 @@ resolution without requiring pooling.
 (`hc_seq, lc_seq, target_seq, kd_nm, source, antibody, antigen, notes`). Script: `scripts/curate_dms_data.py`.
 After filtering incomplete rows (no target, no LC, no KD): **71,239 rows** in `curated_data/filtered_data.csv`.
 Data lives on S3 — both local data dirs are gitignored:
-- Raw DMS: `s3://scrippsresearch-mshafiei-hackathon/DMS_Data/`
-- Curated: `s3://scrippsresearch-mshafiei-hackathon/curated_data/filtered_data.csv`
+- Raw DMS: `s3://<your-bucket>/DMS_Data/`
+- Curated: `s3://<your-bucket>/curated_data/filtered_data.csv`
 
 | Source | Rows | Notes |
 |--------|------|-------|
@@ -362,9 +362,9 @@ Labels: `unified_labels_norm.npy` (z-scored, use this as target).
 
 Teammate sync:
 ```bash
-aws s3 sync s3://scrippsresearch-mshafiei-hackathon/embeddings/ embeddings/ \
+aws s3 sync s3://<your-bucket>/embeddings/ embeddings/ \
   --profile <your-profile> --region us-west-2 --exclude "*_raw.npy" --exclude "curated_*"
-aws s3 cp s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity.csv \
+aws s3 cp s3://<your-bucket>/curated_data/unified_affinity.csv \
   curated_data/ --profile <your-profile> --region us-west-2
 ```
 
@@ -374,7 +374,7 @@ aws s3 cp s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity.
 
 - Implemented the full single-register baseline pipeline on the `mahdi_quant` branch: `quantab/data.py` (Phillips/Engelhart/trastuzumab loaders), `embeddings.py` (IgBERT + ESM-2 35M/150M/650M + BALM-paired registry with PCA), `quantum_kernels.py` (minimal + expressive single-register kernels), `classical.py`, `evaluation.py` (learning curves + Spearman), `visualization.py`, and CLI scripts `extract_embeddings.py` / `run_experiments.py` / `generate_figures.py`.
 - This serves as the **ablation/baseline arm** of the two-register design (single-register on antibody-only features) — a starting point to build the target modality and two-register circuit on top of, not a competing design.
-- Mirrored the DMS datasets (~162 MB) to `s3://scrippsresearch-mshafiei-hackathon/`, readable by the whole hackathon account; download instructions in `data/README.md`.
+- Mirrored the DMS datasets (~162 MB) to the team S3 bucket, readable by the whole hackathon account; download instructions in `data/README.md`.
 - Known gaps to address: `scripts/extract_embeddings.py` concatenates heavy+light for all models (breaks BALM-paired, which needs separate chains — the library `embed_and_reduce` path is already correct); PennyLane not yet installed in the base env, so the quantum arm has not been run end-to-end.
 
 ---
@@ -429,9 +429,9 @@ Pipeline: extract separately → z-score normalize each independently → separa
 
 ### 2026-05-29 — Infrastructure setup (Benjamin + Claude)
 
-- AWS CLI installed, SSO configured with profile `bnemoz-scripps` on hackathon account `127696279288`
+- AWS CLI installed, SSO configured on the hackathon AWS account
 - Working directly on https://github.com/brineylab/QuantAb (no fork). Each team member has their own branch: `benjamin` (bnemoz), Mahdi and Terrence create their own.
-- EC2 `c5.4xlarge` launched (`i-038ef1f119518297a`) with 100 GB EBS; SSH via EICE documented in CLAUDE.md
+- EC2 `c5.4xlarge` launched with 100 GB EBS; SSH via EICE documented in CLAUDE.md
 - GPU quota (G/VT instances) is 0 on account — needs organizer to request increase before switching to `g4dn.xlarge` + `lightning.gpu`
 - Qubit plan updated: test **6, 10, and 14 qubits** (three points on scaling axis)
 - Affinity dataset schema confirmed: CSV with `heavy chain seq`, `light chain seq`, `target prot seq`, `affinity (KD)` — plain AA strings, no numbering scheme

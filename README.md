@@ -82,7 +82,7 @@ affinity-sourcing corpus, cleaned + normalized by `scripts/build_corpus_dataset.
   (categorical), AB-Bind (ΔΔG), SKEMPI (no sequences).
 
 Full details: [`data/README.md`](data/README.md) and [`results-classic.md`](results-classic.md).
-S3: `s3://scrippsresearch-mshafiei-hackathon/curated_data/unified_affinity_v3.csv`
+S3: `s3://<your-bucket>/curated_data/unified_affinity_v3.csv`
 
 ---
 

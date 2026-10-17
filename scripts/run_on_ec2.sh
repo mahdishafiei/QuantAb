@@ -6,12 +6,16 @@
 #   bash scripts/run_on_ec2.sh --sync-only
 #   bash scripts/run_on_ec2.sh --shell    # sync and drop into interactive shell
 #
+# Requires (not stored in the repo):
+#   export QUANTAB_INSTANCE_ID=<instance-id> AWS_PROFILE=<your-profile> QUANTAB_S3_BUCKET=<your-bucket>
+#
 # The EICE key push window is 60 s — the script handles this automatically.
 
 set -euo pipefail
 
-INSTANCE_ID="i-038ef1f119518297a"
-AWS_PROFILE="bnemoz-scripps"
+INSTANCE_ID="${QUANTAB_INSTANCE_ID:?export QUANTAB_INSTANCE_ID (EC2 instance ID)}"
+AWS_PROFILE="${AWS_PROFILE:?export AWS_PROFILE (your AWS SSO profile)}"
+S3_BUCKET="${QUANTAB_S3_BUCKET:?export QUANTAB_S3_BUCKET (team bucket name)}"
 AWS_REGION="us-west-2"
 REMOTE_USER="ec2-user"
 KEY_PATH="/tmp/eice-quantab-key"
@@ -87,13 +91,13 @@ REMOTE
 
 # ── 5. Sync embeddings from S3 (skip if already present) ─────────────────────
 echo "==> Syncing embeddings from S3 …"
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${INSTANCE_ID}" bash <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${INSTANCE_ID}" "S3_BUCKET='${S3_BUCKET}' bash" <<'REMOTE'
 set -euo pipefail
 cd ~/quantab
 source venv/bin/activate
 mkdir -p embeddings
 # Only download PCA-reduced files (skip raw arrays, ~160 MB each)
-aws s3 sync s3://scrippsresearch-mshafiei-hackathon/embeddings/ embeddings/ \
+aws s3 sync "s3://${S3_BUCKET}/embeddings/" embeddings/ \
   --region us-west-2 \
   --exclude "*_raw.npy" \
   --no-progress \

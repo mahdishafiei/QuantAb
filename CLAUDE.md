@@ -31,7 +31,7 @@ two-register quantum arm (below) is the next build. Current state:
   S3 `results/results-classic.md`); raw scores in S3 `results/regression_grouped.json`.
 - **AWS** — inference runs on EC2 GPUs (g5.12xlarge / g4dn.12xlarge, 4 GPUs, one model per GPU) via
   a self-contained bootstrap that pulls code+data from S3, embeds, benchmarks, and syncs results
-  back. Profile `mshafiei-scripps`, bucket `scrippsresearch-mshafiei-hackathon`.
+  back. AWS profile and bucket names are set per user and are not stored in the repo.
 
 ## Embedding architecture (two modalities, two registers)
 
@@ -123,7 +123,7 @@ What is implemented today:
 
 DMS datasets are **not committed** (~162 MB). They are mirrored to S3 and also live on the hackathon server.
 
-- **S3 (source of truth):** `s3://scrippsresearch-mshafiei-hackathon/DMS_Data/` and `.../AB-Bind-Database/` (readable by everyone in the hackathon AWS account `127696279288`). See `data/README.md` for download commands.
+- **S3 (source of truth):** `s3://<your-bucket>/DMS_Data/` and `.../AB-Bind-Database/` (team bucket in the hackathon AWS account). See `data/README.md` for download commands.
 - **Server-local:** `/home/jovyan/work/Hackaton/DMS_Data/`
 
 | Directory | Dataset | Key columns | N variants |
@@ -224,12 +224,16 @@ This repo will be shared with labmates and PI. Code should be clean, well-docume
 
 | Field | Value |
 |---|---|
-| Instance ID | `i-038ef1f119518297a` |
 | Type | `c5.4xlarge` (16 vCPUs, 32 GB RAM) |
-| Private IP | `172.31.66.186` |
 | Data volume | 100 GB EBS at `/dev/xvdf` → mounted at `/data` |
-| AWS profile | `bnemoz-scripps` |
 | Region | `us-west-2` |
+
+Instance ID, AWS profile and bucket are not stored in the repo — export them before running the
+commands below or `scripts/run_on_ec2.sh`:
+
+```bash
+export QUANTAB_INSTANCE_ID=<instance-id> AWS_PROFILE=<your-profile> QUANTAB_S3_BUCKET=<your-bucket>
+```
 
 Currently CPU-only (`lightning.qubit`). GPU quota increase pending — when granted, relaunch as `g4dn.xlarge` and switch to `lightning.gpu`.
 
@@ -239,16 +243,16 @@ Currently CPU-only (`lightning.qubit`). GPU quota increase pending — when gran
 ssh-keygen -t ed25519 -N "" -f /tmp/eice-key -q <<< y
 
 aws ec2-instance-connect send-ssh-public-key \
-  --instance-id i-038ef1f119518297a \
+  --instance-id "$QUANTAB_INSTANCE_ID" \
   --instance-os-user ec2-user \
   --ssh-public-key file:///tmp/eice-key.pub \
-  --profile bnemoz-scripps --region us-west-2
+  --profile "$AWS_PROFILE" --region us-west-2
 
 ssh -i /tmp/eice-key -o StrictHostKeyChecking=no \
-  -o ProxyCommand='aws ec2-instance-connect open-tunnel \
-    --instance-id i-038ef1f119518297a \
-    --profile bnemoz-scripps --region us-west-2' \
-  ec2-user@i-038ef1f119518297a
+  -o ProxyCommand="aws ec2-instance-connect open-tunnel \
+    --instance-id $QUANTAB_INSTANCE_ID \
+    --profile $AWS_PROFILE --region us-west-2" \
+  ec2-user@"$QUANTAB_INSTANCE_ID"
 ```
 
 **Mount data volume (first login only):**
@@ -262,8 +266,8 @@ sudo mount /dev/xvdf /data && sudo chown ec2-user:ec2-user /data
 
 ```bash
 scp -i /tmp/eice-key \
-  -o ProxyCommand='aws ec2-instance-connect open-tunnel --instance-id i-038ef1f119518297a --profile bnemoz-scripps --region us-west-2' \
-  ./script.py ec2-user@i-038ef1f119518297a:/home/ec2-user/
+  -o ProxyCommand="aws ec2-instance-connect open-tunnel --instance-id $QUANTAB_INSTANCE_ID --profile $AWS_PROFILE --region us-west-2" \
+  ./script.py ec2-user@"$QUANTAB_INSTANCE_ID":/home/ec2-user/
 ```
 
 ## What to avoid
